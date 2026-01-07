@@ -40,14 +40,14 @@ All `cherve` actions require **sudo**.
 ## Installation
 
 ### Bootstrap installer (recommended)
-This repo ships an `install.sh` intended for a one-liner install that:
+This repo ships an `install_chevre.sh` intended for a one-liner install that:
 - installs `python3` and `pipx` if needed
 - installs `cherve` via `pipx` from this GitHub repo
 - makes the `cherve` command available globally
 
 Example:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/channor/cherve/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/channor/cherve/main/install_chevre.sh | sudo bash
 ```
 
 ### Manual install (developer / testing)
@@ -205,7 +205,7 @@ cherve/
     system.py       # command runner, checks, fs helpers
     templates/
       nginx_site.conf
-  install.sh
+  install_chevre.sh
   pyproject.toml
   README.md
   AGENTS.md
