@@ -20,6 +20,19 @@ class PackageChoice:
 
 
 ALWAYS_INSTALL: tuple[PackageChoice, ...] = (
+    PackageChoice("software-properties-common", ("software-properties-common",), None),
+    PackageChoice("curl", ("curl",), None),
+    PackageChoice("wget", ("wget",), None),
+    PackageChoice("nano", ("nano",), None),
+    PackageChoice("zip", ("zip",), None),
+    PackageChoice("unzip", ("unzip",), None),
+    PackageChoice("openssl", ("openssl",), None),
+    PackageChoice("expect", ("expect",), None),
+    PackageChoice("ca-certificates", ("ca-certificates",), None),
+    PackageChoice("gnupg", ("gnupg",), None),
+    PackageChoice("lsb-release", ("lsb-release",), None),
+    PackageChoice("jq", ("jq",), None),
+    PackageChoice("bc", ("bc",), None),
     PackageChoice("git", ("git",), None),
     PackageChoice("ufw", ("ufw",), None),
     PackageChoice("nginx", ("nginx",), None, service="nginx"),
