@@ -67,6 +67,12 @@ Run:
 sudo cherve --help
 ```
 
+### Reinstall
+
+```bash
+sudo pipx install --force "git+https://github.com/channor/cherve-server.git@main"
+```
+
 ## Quick start
 
 ### 1. Install server requirements
