@@ -52,26 +52,23 @@ def install() -> None:
     package_choices: list[dict[str, object]] = []
 
     for choice in ALWAYS_INSTALL:
-        selected = True
-        missing = [package for package in choice.packages if not system.is_installed_apt(package)]
-        all_installed = not missing
-        package_choices.append({"choice": choice, "selected": selected, "missing": missing})
+        missing = [pkg for pkg in choice.packages if not system.is_installed_apt(pkg)]
         if missing:
             to_install.extend(missing)
-        if choice.service and selected and (missing or all_installed):
+        if choice.service:
             enabled_services.append(choice.service)
 
     for choice in OPTIONAL_INSTALL:
         default = choice.default if choice.default is not None else True
-        selected = typer.confirm(f"Install {choice.name}?", default=default)
-        missing = [package for package in choice.packages if not system.is_installed_apt(package)]
-        all_installed = not missing
-        package_choices.append({"choice": choice, "selected": selected, "missing": missing})
-        if selected:
+        if typer.confirm(f"Install {choice.name}?", default=default):
+            missing = [pkg for pkg in choice.packages if not system.is_installed_apt(pkg)]
             if missing:
                 to_install.extend(missing)
-            if choice.service and (missing or all_installed):
+            if choice.service:
                 enabled_services.append(choice.service)
+
+    to_install = list(dict.fromkeys(to_install))
+    enabled_services = list(dict.fromkeys(enabled_services))
 
     if to_install:
         system.run(["apt-get", "update"])
