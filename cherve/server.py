@@ -81,7 +81,7 @@ def install() -> None:
         nginx_sites_enabled=str(paths.NGINX_SITES_ENABLED),
         mysql_installed=system.is_installed_apt("mysql-server"),
         certbot_installed=system.is_installed_apt("certbot"),
-        client_max_body_size="20m",
+        client_max_body_size="20M",
     )
     config.write_server_config(server_config)
     typer.echo("Server install complete. Config written to /etc/cherve/server.toml")

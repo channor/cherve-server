@@ -56,7 +56,7 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
         nginx_sites_enabled=str(tmp_path / "nginx" / "sites-enabled"),
         mysql_installed=True,
         certbot_installed=False,
-        client_max_body_size="20m",
+        client_max_body_size="20M",
     )
 
     monkeypatch.setattr(config, "read_server_config", lambda: server_cfg)
