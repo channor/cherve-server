@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Optional
 
 import typer
 
@@ -16,9 +16,23 @@ class PackageChoice:
     packages: tuple[str, ...]
     default: bool | None
     service: str | None = None
+    post_install: Optional[Callable[[str], None]] = None  # receives php_version
 
 
 ALWAYS_INSTALL: tuple[PackageChoice, ...] = (
+    PackageChoice("software-properties-common", ("software-properties-common",), None),
+    PackageChoice("curl", ("curl",), None),
+    PackageChoice("wget", ("wget",), None),
+    PackageChoice("nano", ("nano",), None),
+    PackageChoice("zip", ("zip",), None),
+    PackageChoice("unzip", ("unzip",), None),
+    PackageChoice("openssl", ("openssl",), None),
+    PackageChoice("expect", ("expect",), None),
+    PackageChoice("ca-certificates", ("ca-certificates",), None),
+    PackageChoice("gnupg", ("gnupg",), None),
+    PackageChoice("lsb-release", ("lsb-release",), None),
+    PackageChoice("jq", ("jq",), None),
+    PackageChoice("bc", ("bc",), None),
     PackageChoice("git", ("git",), None),
     PackageChoice("ufw", ("ufw",), None),
     PackageChoice("nginx", ("nginx",), None, service="nginx"),
@@ -35,6 +49,8 @@ ALWAYS_INSTALL: tuple[PackageChoice, ...] = (
         ),
         None,
         service="php8.3-fpm",
+        # Keep PHP-specific follow-ups near the PHP choice
+        post_install=lambda php_version: _apply_php_fpm_ini_templates(php_version),
     ),
     PackageChoice("composer", ("composer",), None),
 )
@@ -63,11 +79,7 @@ def _apply_php_fpm_ini_templates(php_version: str) -> None:
         typer.echo(f"Warning: PHP conf.d directory not found at {php_conf_dir}")
         return
 
-    template_names = ("99-php.ini", "99-opcache.ini")
-
-    # Templates are expected at: cherve/templates/<name>
-    # and included via pyproject.toml [tool.setuptools.package-data].
-    for name in template_names:
+    for name in ("99-php.ini", "99-opcache.ini"):
         try:
             src = resources.files("cherve").joinpath("templates", name)
             if not src.is_file():
@@ -81,46 +93,24 @@ def _apply_php_fpm_ini_templates(php_version: str) -> None:
             typer.echo(f"Warning: failed applying PHP ini template {name}: {e}")
 
 
-def install() -> None:
-    system.require_root()
+def _missing_packages(packages: tuple[str, ...]) -> list[str]:
+    return [pkg for pkg in packages if not system.is_installed_apt(pkg)]
 
-    php_version = "8.3"
 
-    to_install: list[str] = []
-    enabled_services: list[str] = []
+def _install_packages(packages: list[str]) -> None:
+    if not packages:
+        return
+    system.run(["apt-get", "update"])
+    system.run(["apt-get", "install", "-y", *packages])
 
-    # Always-install set
-    for choice in ALWAYS_INSTALL:
-        missing = [pkg for pkg in choice.packages if not system.is_installed_apt(pkg)]
-        to_install.extend(missing)
-        if choice.service:
-            enabled_services.append(choice.service)
 
-    # Optional set
-    for choice in OPTIONAL_INSTALL:
-        default = choice.default if choice.default is not None else True
-        if typer.confirm(f"Install {choice.name}?", default=default):
-            missing = [pkg for pkg in choice.packages if not system.is_installed_apt(pkg)]
-            to_install.extend(missing)
-            if choice.service:
-                enabled_services.append(choice.service)
-
-    to_install = _dedupe_keep_order(to_install)
-    enabled_services = _dedupe_keep_order(enabled_services)
-
-    if to_install:
-        system.run(["apt-get", "update"])
-        system.run(["apt-get", "install", "-y", *to_install])
-
-    # Enable services (non-fatal if a service doesn't exist or can't be enabled)
-    for service in enabled_services:
+def _enable_services(services: list[str]) -> None:
+    for service in services:
         if not system.service_enabled(service):
             system.run(["systemctl", "enable", "--now", service], check=False)
 
-    # Apply PHP-FPM ini overrides (non-fatal)
-    _apply_php_fpm_ini_templates(php_version)
 
-    # Persist server config
+def _write_server_config(*, php_version: str) -> None:
     server_config = config.ServerConfig(
         php_version=php_version,
         php_fpm_service=f"php{php_version}-fpm",
@@ -132,4 +122,51 @@ def install() -> None:
         client_max_body_size="20M",
     )
     config.write_server_config(server_config)
+
+
+def _collect_plan(php_version: str) -> tuple[list[str], list[str], list[Callable[[str], None]]]:
+    to_install: list[str] = []
+    enabled_services: list[str] = []
+    post_steps: list[Callable[[str], None]] = []
+
+    for choice in ALWAYS_INSTALL:
+        to_install.extend(_missing_packages(choice.packages))
+        if choice.service:
+            enabled_services.append(choice.service)
+        if choice.post_install:
+            post_steps.append(choice.post_install)
+
+    for choice in OPTIONAL_INSTALL:
+        default = True if choice.default is None else choice.default
+        if typer.confirm(f"Install {choice.name}?", default=default):
+            to_install.extend(_missing_packages(choice.packages))
+            if choice.service:
+                enabled_services.append(choice.service)
+            if choice.post_install:
+                post_steps.append(choice.post_install)
+
+    return (
+        _dedupe_keep_order(to_install),
+        _dedupe_keep_order(enabled_services),
+        post_steps,
+    )
+
+
+def install() -> None:
+    system.require_root()
+
+    php_version = "8.3"
+
+    to_install, enabled_services, post_steps = _collect_plan(php_version)
+
+    _install_packages(to_install)
+    _enable_services(enabled_services)
+
+    for step in post_steps:
+        try:
+            step(php_version)
+        except Exception as e:
+            typer.echo(f"Warning: post-install step failed: {e}")
+
+    _write_server_config(php_version=php_version)
     typer.echo("Server install complete. Config written to /etc/cherve/server.toml")
