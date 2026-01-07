@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import shutil
 import typer
@@ -78,11 +79,13 @@ def install() -> None:
 
     php_conf_dir = Path(f"/etc/php/{php_version}/fpm/conf.d")
     template_dir = Path(__file__).resolve().parent / "templates"
-    if php_conf_dir.exists():
+    if php_conf_dir.exists() and os.access(php_conf_dir, os.W_OK):
         for template_name in ("99-php.ini", "99-opcache.ini"):
             shutil.copy2(template_dir / template_name, php_conf_dir / template_name)
-    else:
+    elif not php_conf_dir.exists():
         typer.echo(f"Warning: PHP conf.d directory not found at {php_conf_dir}")
+    else:
+        typer.echo(f"Warning: PHP conf.d directory not writable at {php_conf_dir}")
 
     # Note: we intentionally apply these ini files to PHP-FPM only, not CLI.
     # CLI-specific overrides can differ for scripts or cron jobs.
