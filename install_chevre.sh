@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/channor/cherve.git"
+BRANCH="${BRANCH:-main}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "This installer must be run as root. Try: sudo bash install_chevre.sh" >&2
@@ -9,17 +10,15 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 apt-get update
-apt-get install -y python3 python3-pip pipx
+apt-get install -y python3 python3-pip python3-venv pipx git
 
-pipx ensurepath
-export PATH="/root/.local/bin:${PATH}"
+export PIPX_HOME="/opt/pipx"
+export PIPX_BIN_DIR="/usr/local/bin"
+mkdir -p "$PIPX_HOME" "$PIPX_BIN_DIR"
 
-if pipx list | grep -q "^package cherve"; then
-  pipx upgrade cherve
-else
-  pipx install "git+${REPO_URL}"
-fi
+pipx install --force "git+${REPO_URL}@${BRANCH}"
 
 echo ""
-echo "Cherve installed. Run:"
+echo "Cherve installed from branch: ${BRANCH}"
+echo "Run:"
 echo "  sudo cherve server install"
