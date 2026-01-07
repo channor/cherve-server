@@ -94,20 +94,31 @@ def _apply_php_fpm_ini_templates(php_version: str) -> None:
 
 
 def _missing_packages(packages: tuple[str, ...]) -> list[str]:
-    return [pkg for pkg in packages if not system.is_installed_apt(pkg)]
+    missing = []
+    for pkg in packages:
+        typer.echo(f"Checking package {pkg}...")
+        if not system.is_installed_apt(pkg):
+            missing.append(pkg)
+    return missing
 
 
 def _install_packages(packages: list[str]) -> None:
     if not packages:
         return
+    typer.echo("Updating package lists...")
     system.run(["apt-get", "update"])
+    typer.echo(f"Installing package(s): {', '.join(packages)}")
     system.run(["apt-get", "install", "-y", *packages])
 
 
 def _enable_services(services: list[str]) -> None:
+    if services:
+        typer.echo("Restarting service(s)...")
     for service in services:
         if not system.service_enabled(service):
             system.run(["systemctl", "enable", "--now", service], check=False)
+        else:
+            system.run(["systemctl", "restart", service], check=False)
 
 
 def _write_server_config(*, php_version: str) -> None:
@@ -124,7 +135,11 @@ def _write_server_config(*, php_version: str) -> None:
     config.write_server_config(server_config)
 
 
-def _collect_plan(php_version: str) -> tuple[list[str], list[str], list[Callable[[str], None]]]:
+def _collect_plan(
+    php_version: str,
+    *,
+    interactive: bool,
+) -> tuple[list[str], list[str], list[Callable[[str], None]]]:
     to_install: list[str] = []
     enabled_services: list[str] = []
     post_steps: list[Callable[[str], None]] = []
@@ -138,7 +153,11 @@ def _collect_plan(php_version: str) -> tuple[list[str], list[str], list[Callable
 
     for choice in OPTIONAL_INSTALL:
         default = True if choice.default is None else choice.default
-        if typer.confirm(f"Install {choice.name}?", default=default):
+        if interactive:
+            confirmed = typer.confirm(f"Install {choice.name}?", default=default)
+        else:
+            confirmed = default
+        if confirmed:
             to_install.extend(_missing_packages(choice.packages))
             if choice.service:
                 enabled_services.append(choice.service)
@@ -152,12 +171,12 @@ def _collect_plan(php_version: str) -> tuple[list[str], list[str], list[Callable
     )
 
 
-def install() -> None:
+def install(*, interactive: bool = False) -> None:
     system.require_root()
 
     php_version = "8.3"
 
-    to_install, enabled_services, post_steps = _collect_plan(php_version)
+    to_install, enabled_services, post_steps = _collect_plan(php_version, interactive=interactive)
 
     _install_packages(to_install)
     _enable_services(enabled_services)
