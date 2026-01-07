@@ -41,7 +41,6 @@ OPTIONAL_INSTALL = (
     PackageChoice("mysql", ("mysql-server",), True, service="mysql"),
     PackageChoice("supervisor", ("supervisor",), True, service="supervisor"),
     PackageChoice("certbot", ("certbot", "python3-certbot-nginx"), True),
-    PackageChoice("awscli", ("awscli",), True),
     PackageChoice("npm", ("npm",), False),
 )
 
@@ -50,6 +49,7 @@ def install() -> None:
     system.require_root()
     to_install: list[str] = []
     enabled_services: list[str] = []
+    package_choices: list[dict[str, object]] = []
 
     for choice in ALWAYS_INSTALL:
         missing = [pkg for pkg in choice.packages if not system.is_installed_apt(pkg)]
@@ -86,7 +86,7 @@ def install() -> None:
         nginx_sites_enabled=str(paths.NGINX_SITES_ENABLED),
         mysql_installed=system.is_installed_apt("mysql-server"),
         certbot_installed=system.is_installed_apt("certbot"),
-        client_max_body_size="20m",
+        client_max_body_size="20M",
     )
     config.write_server_config(server_config)
     typer.echo("Server install complete. Config written to /etc/cherve/server.toml")
