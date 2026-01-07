@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/channor/cherve.git"
+REPO_URL="https://github.com/channor/cherve-server.git"
 BRANCH="${BRANCH:-main}"
 
 if [[ "$(id -u)" -ne 0 ]]; then

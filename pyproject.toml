@@ -17,3 +17,7 @@ test = [
 
 [project.scripts]
 cherve = "cherve.cli:main"
+
+[project.urls]
+Repository = "https://github.com/channor/cherve-server"
+Issues = "https://github.com/channor/cherve-server/issues"
