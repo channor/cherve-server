@@ -41,7 +41,6 @@ OPTIONAL_INSTALL = (
     PackageChoice("mysql", ("mysql-server",), True, service="mysql"),
     PackageChoice("supervisor", ("supervisor",), True, service="supervisor"),
     PackageChoice("certbot", ("certbot", "python3-certbot-nginx"), True),
-    PackageChoice("awscli", ("awscli",), True),
     PackageChoice("npm", ("npm",), False),
 )
 
