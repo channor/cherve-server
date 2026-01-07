@@ -43,6 +43,7 @@ def test_server_install_skips_installed_packages(monkeypatch) -> None:
 def test_server_install_uses_defaults_without_prompts(monkeypatch) -> None:
     runner = CliRunner()
     calls = []
+    written = {}
 
     def fake_require_root() -> None:
         return None
@@ -56,10 +57,14 @@ def test_server_install_uses_defaults_without_prompts(monkeypatch) -> None:
             returncode = 0
         return Result()
 
+    def fake_write(cfg: config.ServerConfig) -> None:
+        written["cfg"] = cfg
+
     monkeypatch.setattr(system, "require_root", fake_require_root)
     monkeypatch.setattr(system, "is_installed_apt", fake_is_installed)
     monkeypatch.setattr(system, "run", fake_run)
     monkeypatch.setattr(system, "service_enabled", lambda _name: False)
+    monkeypatch.setattr(config, "write_server_config", fake_write)
     monkeypatch.setattr(server.typer, "confirm", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()))
 
     result = runner.invoke(cli.app, ["server", "install"])
@@ -71,3 +76,4 @@ def test_server_install_uses_defaults_without_prompts(monkeypatch) -> None:
     assert "npm" not in installed_packages
     assert "mysql-server" in installed_packages
     assert "Installing package(s)" in result.output
+    assert "cfg" in written
