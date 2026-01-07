@@ -22,7 +22,7 @@ class ServerConfig:
     nginx_sites_enabled: str
     mysql_installed: bool
     certbot_installed: bool
-    client_max_body_size: str = "20m"
+    client_max_body_size: str = "20M"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -46,7 +46,7 @@ class ServerConfig:
             nginx_sites_enabled=str(data["nginx_sites_enabled"]),
             mysql_installed=bool(data.get("mysql_installed", False)),
             certbot_installed=bool(data.get("certbot_installed", False)),
-            client_max_body_size=str(data.get("client_max_body_size", "20m")),
+            client_max_body_size=str(data.get("client_max_body_size", "20M")),
         )
 
 

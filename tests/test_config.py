@@ -12,7 +12,7 @@ def test_server_config_roundtrip(tmp_path: Path) -> None:
         nginx_sites_enabled="/etc/nginx/sites-enabled",
         mysql_installed=True,
         certbot_installed=False,
-        client_max_body_size="20m",
+        client_max_body_size="20M",
     )
     path = tmp_path / "server.toml"
     config.write_server_config(cfg, path)
