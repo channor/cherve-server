@@ -104,13 +104,20 @@ sudo cherve site deploy microsoft.com
 Example:
 
 ```toml
-php_version = "8.3"
-php_fpm_service = "php8.3-fpm"
-php_fpm_sock = "/run/php/php8.3-fpm.sock"
-nginx_sites_available = "/etc/nginx/sites-available"
-nginx_sites_enabled = "/etc/nginx/sites-enabled"
+default_php_version = "8.3"
+
+[php."8.3"]
+fpm_service = "php8.3-fpm"
+fpm_sock = "/run/php/php8.3-fpm.sock"
+
+[nginx]
+sites_available = "/etc/nginx/sites-available"
+sites_enabled = "/etc/nginx/sites-enabled"
+
+[features]
 mysql_installed = true
 certbot_installed = true
+
 ```
 
 ### Per-site config
@@ -152,7 +159,7 @@ db_owner_user = "microsoft_db_owner"
 Default install choices:
 
 * Always: git, ufw, nginx, php8.3, composer
-* Default Yes: fail2ban, clamav, mysql, supervisor, certbot (Let’s Encrypt), AWS CLI
+* Default Yes: fail2ban, clamav, mysql, supervisor, certbot (Let’s Encrypt)
 * Default No: npm
 
 `cherve site create`

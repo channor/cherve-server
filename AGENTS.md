@@ -24,7 +24,6 @@ Apps are deployed directly into:
 The repository is cloned/pulled into `site_root` itself.
 
 ### Environment file creation happens on first deploy
-`cherve site create` does not create `.env`.
 
 On first deploy, if `<site_root>/.env` is missing:
 - copy from the first existing file in this order:
@@ -59,21 +58,86 @@ Store DB identity values in the site config so deploy can populate `.env`.
 Interactive install wizard for packages commonly needed for PHP/Laravel hosting.
 
 Default choices:
-- Always install: `git`, `ufw`, `nginx`, `php8.3` (+ extensions), `composer`
-- Defaults to Yes: `fail2ban`, `clamav`, `mysql`, `supervisor`, `certbot`, `awscli`
-- Default No: `npm`
+
+- Always install (no prompt)
+
+  - Base tools:
+    - git
+    - ufw
+      - configure: allow 22/tcp, 80/tcp, 443/tcp
+      - safety: ensure 22/tcp is allowed before enabling ufw
+      - enable ufw if not enabled
+    - composer
+    - software-properties-common
+    - curl
+    - wget
+    - nano
+    - zip
+    - unzip
+    - openssl
+    - expect
+    - ca-certificates
+    - gnupg
+    - lsb-release
+    - jq
+    - bc
+    - python3-pip
+
+  - Web stack:
+    - nginx
+      - post-install:
+        - create systemd override file `/etc/systemd/system/nginx.service.d/override.conf` with:
+          ```
+          [Service]
+          LimitNOFILE=65535
+          ```
+        - `systemctl daemon-reload` then restart nginx
+        - ensure `server_tokens off;` is present inside `http { ... }` in `/etc/nginx/nginx.conf` (add if missing)
+
+  - PHP (choose one):
+    - php8.3 (default)
+      - packages: php8.3, php8.3-fpm, php8.3-cli, php8.3-common, php8.3-curl, php8.3-bcmath,
+        php8.3-mbstring, php8.3-mysql, php8.3-zip, php8.3-xml, php8.3-soap, php8.3-gd,
+        php8.3-imagick, php8.3-intl, php8.3-opcache
+      - post-install: copy templates `99-opcache.ini` and `99-php.ini` into `/etc/php/<ver>/fpm/conf.d/`
+    - php8.4
+      - pre-install: add `ppa:ondrej/php`
+      - packages: same extensions list for 8.4
+      - post-install: copy templates `99-opcache.ini` and `99-php.ini`
+    - php8.2
+      - pre-install: add `ppa:ondrej/php`
+      - packages: same extensions list for 8.2
+      - post-install: copy templates `99-opcache.ini` and `99-php.ini`
+
+- Defaults to Yes (prompt, default yes)
+  - fail2ban
+    - post-install: copy template `jail.local` (do not overwrite if user modified; create if missing)
+  - clamav
+    - packages: clamav, clamav-daemon, clamav-freshclam
+    - post-install:
+      - stop clamav-daemon and clamav-freshclam (non-fatal if not running)
+      - run `freshclam`
+      - enable --now clamav-freshclam and clamav-daemon
+  - mysql (mysql-server)
+  - supervisor
+  - certbot (certbot, python3-certbot-nginx)
+  - awscli
+
+- Default No (prompt, default no)
+  - npm
 
 Implementation requirements:
-- Check each component is already installed before installing.
+- Check whether each package is already installed before installing.
 - Persist detected config to `/etc/cherve/server.toml`:
   - PHP-FPM service name and socket path
   - nginx config paths
-  - whether mysql/certbot installed
+  - whether mysql/certbot are installed
 - Prefer safe, minimal configuration changes:
-  - validate nginx after changes
+  - validate nginx after changes (`nginx -t`)
   - enable services where appropriate
 
 ### `cherve site create`
+
 Interactive wizard to create a site.
 Prompts:
 - Username (e.g. `microsoft`)
