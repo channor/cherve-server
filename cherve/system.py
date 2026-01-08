@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from typing import Sequence
@@ -38,10 +39,19 @@ def run_as_user(
     cwd: str | os.PathLike[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     if isinstance(argv_or_bash, str):
-        argv = ["sudo", "-iu", user, "bash", "-lc", argv_or_bash]
+        if env:
+            env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+            command = f"{env_prefix} {argv_or_bash}"
+        else:
+            command = argv_or_bash
+        argv = ["sudo", "-iu", user, "bash", "-lc", command]
     else:
-        argv = ["sudo", "-iu", user, "--", *argv_or_bash]
-    return run(argv, check=check, capture=capture, env=env, cwd=cwd)
+        if env:
+            env_assignments = [f"{key}={value}" for key, value in env.items()]
+            argv = ["sudo", "-iu", user, "--", "env", *env_assignments, *argv_or_bash]
+        else:
+            argv = ["sudo", "-iu", user, "--", *argv_or_bash]
+    return run(argv, check=check, capture=capture, cwd=cwd)
 
 
 def _is_root() -> bool:
