@@ -13,10 +13,14 @@ def run(
     env: dict[str, str] | None = None,
     cwd: str | os.PathLike[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    resolved_env = None
+    if env is not None:
+        resolved_env = os.environ.copy()
+        resolved_env.update(env)
     kwargs = {
         "check": check,
         "text": True,
-        "env": env,
+        "env": resolved_env,
         "cwd": cwd,
     }
     if capture:
