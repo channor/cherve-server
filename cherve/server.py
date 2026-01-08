@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import click
 import typer
 
 from cherve import config
@@ -53,7 +54,6 @@ OPTIONAL_DEFAULT_YES = {
     "mysql": ["mysql-server"],
     "supervisor": ["supervisor"],
     "certbot": ["certbot", "python3-certbot-nginx"],
-    "awscli": ["awscli"],
 }
 
 OPTIONAL_DEFAULT_NO = {"npm": ["npm"]}
@@ -131,25 +131,45 @@ def _ensure_clamav() -> None:
     system.run(["systemctl", "enable", "--now", "clamav-daemon"])
 
 
-def install(interactive: bool = False) -> None:
+def install() -> None:
     system.require_root()
 
     system.require_cmd("apt-get")
 
     php_versions = ["8.3", "8.4", "8.2"]
-    php_version = "8.3"
-    if interactive:
-        php_version = typer.prompt(
-            "Select PHP version",
-            default="8.3",
-            type=typer.Choice(php_versions, case_sensitive=False),
-        )
+    php_version = typer.prompt(
+        "Select PHP version",
+        default="8.3",
+        type=click.Choice(php_versions, case_sensitive=False),
+    )
+
+    optional_selected: dict[str, bool] = {}
+    for name in OPTIONAL_DEFAULT_YES:
+        optional_selected[name] = typer.confirm(f"Install {name}?", default=True)
+    for name in OPTIONAL_DEFAULT_NO:
+        optional_selected[name] = typer.confirm(f"Install {name}?", default=False)
 
     base_packages = BASE_PACKAGES + ["nginx"]
+    php_packages = [pkg.format(ver=php_version) for pkg in PHP_PACKAGES]
+    selected_optional = [
+        pkg for name, pkgs in OPTIONAL_DEFAULT_YES.items() if optional_selected.get(name) for pkg in pkgs
+    ] + [pkg for name, pkgs in OPTIONAL_DEFAULT_NO.items() if optional_selected.get(name) for pkg in pkgs]
+
+    typer.echo("Packages to install:")
+    typer.echo(f"  Base: {', '.join(base_packages)}")
+    typer.echo(f"  PHP {php_version}: {', '.join(php_packages)}")
+    if selected_optional:
+        typer.echo(f"  Optional: {', '.join(selected_optional)}")
+    else:
+        typer.echo("  Optional: (none)")
+
+    if not typer.confirm("Ready to proceed?", default=True):
+        raise typer.Exit(code=0)
+
     _install_packages(base_packages)
     if php_version in {"8.4", "8.2"}:
         system.run(["add-apt-repository", "-y", "ppa:ondrej/php"])
-    _install_packages([pkg.format(ver=php_version) for pkg in PHP_PACKAGES])
+    _install_packages(php_packages)
     _ensure_ufw()
 
     _copy_php_templates(php_version)
@@ -158,10 +178,7 @@ def install(interactive: bool = False) -> None:
     _ensure_nginx_server_tokens()
 
     for name, pkgs in OPTIONAL_DEFAULT_YES.items():
-        selected = True
-        if interactive:
-            selected = typer.confirm(f"Install {name}?", default=True)
-        if selected:
+        if optional_selected.get(name):
             _install_packages(pkgs)
             if name == "fail2ban":
                 _ensure_fail2ban()
@@ -169,10 +186,7 @@ def install(interactive: bool = False) -> None:
                 _ensure_clamav()
 
     for name, pkgs in OPTIONAL_DEFAULT_NO.items():
-        selected = False
-        if interactive:
-            selected = typer.confirm(f"Install {name}?", default=False)
-        if selected:
+        if optional_selected.get(name):
             _install_packages(pkgs)
 
     system.run(["nginx", "-t"])

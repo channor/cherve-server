@@ -31,7 +31,8 @@ def test_server_install_skips_installed_packages(monkeypatch, temp_paths):
     monkeypatch.setattr(server_module, "_ensure_fail2ban", lambda: None)
     monkeypatch.setattr(server_module, "_ensure_clamav", lambda: None)
 
-    result = CliRunner().invoke(app, ["server", "install"])
+    input_data = "\n".join(["", "", "", "", "", "", "", "y"])
+    result = CliRunner().invoke(app, ["server", "install"], input=input_data)
     assert result.exit_code == 0
 
     install_calls = [cmd for cmd in calls if cmd[:3] == ["apt-get", "install", "-y"]]
