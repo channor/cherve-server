@@ -4,6 +4,7 @@ from pathlib import Path
 import secrets
 import shutil
 
+import click
 import typer
 
 from cherve import config
@@ -221,11 +222,18 @@ def create() -> None:
 def _select_site_config(domain: str | None) -> config.SiteConfig:
     if domain:
         return config.read_site_config(domain=domain)
+
     configs = sorted(paths.SITES_DIR.glob("*.toml"))
     if not configs:
         raise RuntimeError("No sites found in /etc/cherve/sites.d")
+
     choices = [p.stem for p in configs]
-    choice = typer.prompt("Select site", default=choices[0], type=typer.Choice(choices))
+
+    choice = typer.prompt(
+        "Select site",
+        default=choices[0],
+        type=click.Choice(choices, case_sensitive=False),
+    )
     return config.read_site_config(domain=choice)
 
 
@@ -249,8 +257,9 @@ def _env_updates(site: config.SiteConfig, use_https: bool) -> dict[str, str]:
 
 
 def _render_nginx_config(server_name: str, root_path: str, php_fpm_sock: str, client_max_body_size: str) -> str:
-    template_path = Path(__file__).resolve().parent / "templates" / "nginx_site.conf"
-    template = template_path.read_text()
+    template = (Path(__file__).resolve().parent / "templates" / "nginx_site.conf").read_text(
+        encoding="utf-8"
+    )
     return template.format(
         server_name=server_name,
         root_path=root_path,
@@ -309,7 +318,9 @@ def deploy(domain: str | None) -> None:
     site_root = Path(site.site_root)
     repo_dir = site_root / ".git"
     key_path = paths.HOME_ROOT / site.site_user / ".ssh" / "id_cherve_deploy"
-    git_env = {"GIT_SSH_COMMAND": f"ssh -i {key_path} -o IdentitiesOnly=yes"}
+    git_env = {
+        "GIT_SSH_COMMAND": f"ssh -i {key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+    }
 
     if not repo_dir.exists():
         site_root.mkdir(parents=True, exist_ok=True)
