@@ -48,32 +48,49 @@ def _ensure_site_root(site_root: Path, username: str) -> None:
     site_root.mkdir(parents=True, exist_ok=True)
     system.run(["chown", "-R", f"{username}:{username}", str(site_root)])
 
+def _ensure_ssh_dir(username: str) -> Path:
+    ssh_dir = paths.HOME_ROOT / username / ".ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure correct ownership + permissions
+    system.run(["chown", "-R", f"{username}:{username}", str(ssh_dir)])
+    system.run(["chmod", "700", str(ssh_dir)])
+    return ssh_dir
+
 
 def _ensure_deploy_key(username: str) -> Path:
-    ssh_dir = paths.HOME_ROOT / username / ".ssh"
+    ssh_dir = _ensure_ssh_dir(username)
+
     key_path = ssh_dir / "id_cherve_deploy"
     pub_path = ssh_dir / "id_cherve_deploy.pub"
-    ssh_dir.mkdir(parents=True, exist_ok=True)
+
     if not key_path.exists():
-        system.run_as_user(
-            username,
-            ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", ""],
-        )
+        # Use umask so key ends up 600-ish
+        cmd = f"umask 077; ssh-keygen -t ed25519 -f {key_path} -N ''"
+        system.run_as_user(username, cmd)
+
     if not pub_path.exists():
         raise RuntimeError("Deploy key public file missing after generation.")
+
+    # Ensure perms are good (avoid SSH warnings later)
+    system.run(["chown", f"{username}:{username}", str(key_path), str(pub_path)])
+    system.run(["chmod", "600", str(key_path)])
+    system.run(["chmod", "644", str(pub_path)])
+
     return pub_path
 
 
 def _ensure_known_host(username: str, host: str = "github.com") -> None:
-    ssh_dir = paths.HOME_ROOT / username / ".ssh"
+    ssh_dir = _ensure_ssh_dir(username)
     known_hosts = ssh_dir / "known_hosts"
-    if known_hosts.exists() and host in known_hosts.read_text():
-        return
-    result = system.run(["ssh-keyscan", "-H", host], capture=True, check=False)
-    if result.stdout:
-        known_hosts.parent.mkdir(parents=True, exist_ok=True)
-        with known_hosts.open("a") as handle:
-            handle.write(result.stdout)
+
+    # Write known_hosts as the user so ownership stays consistent
+    # (also avoids races with root-owned files)
+    cmd = (
+        f"touch {known_hosts} && "
+        f"grep -q '{host}' {known_hosts} || ssh-keyscan -H {host} >> {known_hosts}"
+    )
+    system.run_as_user(username, cmd, check=False)
 
 
 def _write_site_config(site: config.SiteConfig) -> None:

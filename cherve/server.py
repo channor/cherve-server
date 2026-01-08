@@ -21,6 +21,7 @@ BASE_PACKAGES = [
     "zip",
     "unzip",
     "openssl",
+    "openssh-client",
     "expect",
     "ca-certificates",
     "gnupg",
