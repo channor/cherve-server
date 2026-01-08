@@ -121,7 +121,8 @@ def _ensure_fail2ban() -> None:
         return
     template = Path(__file__).resolve().parent / "templates" / "jail.local"
     target.write_text(template.read_text())
-
+    system.run(["systemctl", "enable", "--now", "fail2ban"], check=False)
+    system.run(["systemctl", "restart", "fail2ban"], check=False)
 
 def _ensure_clamav() -> None:
     system.run(["systemctl", "stop", "clamav-daemon"], check=False)
@@ -129,6 +130,11 @@ def _ensure_clamav() -> None:
     system.run(["freshclam"], check=False)
     system.run(["systemctl", "enable", "--now", "clamav-freshclam"])
     system.run(["systemctl", "enable", "--now", "clamav-daemon"])
+
+POST_INSTALL = {
+    "fail2ban": _ensure_fail2ban,
+    "clamav": _ensure_clamav,
+}
 
 
 def install() -> None:
@@ -169,6 +175,7 @@ def install() -> None:
     _install_packages(base_packages)
     if php_version in {"8.4", "8.2"}:
         system.run(["add-apt-repository", "-y", "ppa:ondrej/php"])
+        system.run(["apt-get", "update"])
     _install_packages(php_packages)
     _ensure_ufw()
 
@@ -180,16 +187,16 @@ def install() -> None:
     for name, pkgs in OPTIONAL_DEFAULT_YES.items():
         if optional_selected.get(name):
             _install_packages(pkgs)
-            if name == "fail2ban":
-                _ensure_fail2ban()
-            if name == "clamav":
-                _ensure_clamav()
+            hook = POST_INSTALL.get(name)
+            if hook:
+                hook()
 
     for name, pkgs in OPTIONAL_DEFAULT_NO.items():
         if optional_selected.get(name):
             _install_packages(pkgs)
 
     system.run(["nginx", "-t"])
+    system.run(["systemctl", "reload", "nginx"], check=False)
 
     server_config = config.ServerConfig(
         default_php_version=php_version,
