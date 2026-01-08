@@ -31,3 +31,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 cherve = ["templates/*.ini", "templates/*.conf", "templates/*.local"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cherve*"]
