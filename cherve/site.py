@@ -4,7 +4,6 @@ from pathlib import Path
 import secrets
 import shutil
 
-from importlib import resources
 import click
 import typer
 
@@ -258,10 +257,8 @@ def _env_updates(site: config.SiteConfig, use_https: bool) -> dict[str, str]:
 
 
 def _render_nginx_config(server_name: str, root_path: str, php_fpm_sock: str, client_max_body_size: str) -> str:
-    template = (
-        resources.files("cherve")
-        .joinpath("templates", "nginx_site.conf")
-        .read_text(encoding="utf-8")
+    template = (Path(__file__).resolve().parent / "templates" / "nginx_site.conf").read_text(
+        encoding="utf-8"
     )
     return template.format(
         server_name=server_name,

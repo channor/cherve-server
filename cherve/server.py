@@ -132,12 +132,6 @@ def _ensure_clamav() -> None:
     system.run(["systemctl", "enable", "--now", "clamav-freshclam"])
     system.run(["systemctl", "enable", "--now", "clamav-daemon"])
 
-POST_INSTALL = {
-    "fail2ban": _ensure_fail2ban,
-    "clamav": _ensure_clamav,
-}
-
-
 def install() -> None:
     system.require_root()
 
@@ -188,9 +182,10 @@ def install() -> None:
     for name, pkgs in OPTIONAL_DEFAULT_YES.items():
         if optional_selected.get(name):
             _install_packages(pkgs)
-            hook = POST_INSTALL.get(name)
-            if hook:
-                hook()
+            if name == "fail2ban":
+                _ensure_fail2ban()
+            if name == "clamav":
+                _ensure_clamav()
 
     for name, pkgs in OPTIONAL_DEFAULT_NO.items():
         if optional_selected.get(name):
