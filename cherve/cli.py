@@ -11,11 +11,9 @@ app.add_typer(server, name="server")
 app.add_typer(site, name="site")
 
 @server.command("install")
-def server_install(
-        interactive: bool = typer.Option(False, "--interactive/--no-interactive", help="Prompt for optional packages."),
-):
+def server_install():
     """Install server requirements."""
-    server_module.install(interactive=interactive)
+    server_module.install()
     raise typer.Exit(code=0)
 
 @site.command("create")
