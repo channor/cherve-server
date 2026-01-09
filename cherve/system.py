@@ -66,13 +66,13 @@ def run_as_user(
             command = f"{env_prefix} {argv_or_bash}"
         else:
             command = argv_or_bash
-        argv = ["sudo", "-iu", user, "bash", "-lc", command]
+        argv = ["sudo", "-u", user, "--", "bash", "-c", command]
     else:
         if env:
             env_assignments = [f"{key}={value}" for key, value in env.items()]
-            argv = ["sudo", "-iu", user, "--", "env", *env_assignments, *argv_or_bash]
+            argv = ["sudo", "-u", user, "--", "env", *env_assignments, *argv_or_bash]
         else:
-            argv = ["sudo", "-iu", user, "--", *argv_or_bash]
+            argv = ["sudo", "-u", user, "--", *argv_or_bash]
     return run(argv, check=check, capture=capture, cwd=cwd)
 
 

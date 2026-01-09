@@ -17,7 +17,7 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     def fake_run_as_user(user, argv_or_bash, **kwargs):
-        argv = argv_or_bash if isinstance(argv_or_bash, (list, tuple)) else ["bash", "-lc", argv_or_bash]
+        argv = argv_or_bash if isinstance(argv_or_bash, (list, tuple)) else ["bash", "-c", argv_or_bash]
         run_as_user_calls.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
