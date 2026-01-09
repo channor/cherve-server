@@ -5,6 +5,7 @@ from importlib import resources
 from pathlib import Path
 
 import click
+import shlex
 import typer
 
 from cherve import config, envfile, paths, system
@@ -34,7 +35,7 @@ def _ensure_deploy_key(site_user: str, key_path: Path) -> Path:
         return key_path
     system.run_as_user(
         site_user,
-        ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(key_path)],
+        ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", ""],
         capture=True,
     )
     known_hosts = ssh_dir / "known_hosts"
