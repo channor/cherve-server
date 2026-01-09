@@ -5,7 +5,7 @@ REPO_URL="https://github.com/channor/cherve-server.git"
 BRANCH="${BRANCH:-main}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "This installer must be run as root. Try: sudo bash install_chevre.sh" >&2
+  echo "This installer must be run as root. Try: sudo bash install_cherve.sh" >&2
   exit 1
 fi
 

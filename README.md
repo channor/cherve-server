@@ -18,7 +18,7 @@ Creates a single isolated “site” on the server:
 - One dedicated Linux user per site (for isolation and separation of concern)
 - One site root under `/var/www/<domain>`
 - A GitHub deploy SSH key owned by the site user
-- Optional MySQL database + DB owner user
+- Optional database + DB owner user
 
 Writes a per-site config file under `/etc/cherve/sites.d/<domain>.toml`.
 
@@ -40,14 +40,14 @@ All `cherve` actions require **sudo**.
 ## Installation
 
 ### Bootstrap installer (recommended)
-This repo ships an `install_chevre.sh` intended for a one-liner install that:
+This repo ships an `install_cherve.sh` intended for a one-liner install that:
 - installs `python3` and `pipx` if needed
 - installs `cherve` via `pipx` from this GitHub repo
 - makes the `cherve` command available globally
 
 Example:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/channor/cherve/main/install_chevre.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/channor/cherve/main/install_cherve.sh | sudo bash
 ```
 
 ### Manual install (developer / testing)
@@ -104,9 +104,8 @@ sudo cherve site deploy microsoft.com
 Example:
 
 ```toml
-default_php_version = "8.3"
-
-[php."8.3"]
+[php]
+version = "php8.3"
 fpm_service = "php8.3-fpm"
 fpm_sock = "/run/php/php8.3-fpm.sock"
 
@@ -116,6 +115,8 @@ sites_enabled = "/etc/nginx/sites-enabled"
 
 [features]
 mysql_installed = true
+pqsql_installed = false
+sqlite_installed = false
 certbot_installed = true
 
 ```
@@ -131,13 +132,15 @@ Example:
 domain = "microsoft.com"
 site_user = "microsoft"
 site_root = "/var/www/microsoft.com"
+site_www_root = "/var/www/microsoft.com/public" # 'public' is typical for laravel
 repo_ssh = "git@github.com:ORG/REPO.git"
 branch = "main"
 with_www = true
 email = ""
-db_enabled = true
+db_service = "mysql"
 db_name = "microsoft_sd73io"
 db_owner_user = "microsoft_db_owner"
+# NO USER PASSWORD STORED
 ```
 
 ### App env file (secrets)
@@ -158,7 +161,7 @@ db_owner_user = "microsoft_db_owner"
 
 Default install choices:
 
-* Always: git, ufw, nginx, php8.3, composer
+* Always: git, ufw, nginx, php8.3 (+ extensions), composer, software-properties-common, curl, wget, nano, zip, unzip, openssl, openssh-client, expect, ca-certificates, gnupg, lsb-release, jq, bc, python3-pip
 * Default Yes: fail2ban, clamav, mysql, supervisor, certbot (Let’s Encrypt)
 * Default No: npm
 
@@ -167,18 +170,23 @@ Default install choices:
 * Prompts for:
   * username, domain, email (optional)
   * repo SSH URL, branch, include www
-  * DB options (db name + owner user + password generation)
+  * DB options (db service (choices if multiple available), db name + owner user + password generation)
 * Creates site Linux user with disabled password
 * Creates site root /var/www/<domain> and permissions
 * Generates deploy key under /home/<site_user>/.ssh/
+* Outputs variables on terminal for user to copy (important for secrets and public ket for Github)
 * Writes /etc/cherve/sites.d/<domain>.toml
+* Promts for:
+  * Pub key added to Deploy Key.
+    * if yes, test connection
+      * if success, prompt for "deploy"
 
 `cherve site deploy`
 
 * Selects site (by domain argument or interactive list)
 * Ensures repo present in site root:
   * clone or pull as the site user
-* Creates .env if missing by copying the best available template
+* Creates .env if missing by copying the best available template from SITE_ROOT
 * Makes .env production-ready:
   * APP_ENV=production
   * APP_DEBUG=false
@@ -202,7 +210,7 @@ Default install choices:
 ### Suggested repository structure
 
 ```text
-cherve/
+root/
   cherve/
     __init__.py
     cli.py          # Typer entry point
@@ -212,7 +220,7 @@ cherve/
     system.py       # command runner, checks, fs helpers
     templates/
       nginx_site.conf
-  install_chevre.sh
+  install_cherve.sh
   pyproject.toml
   README.md
   AGENTS.md
