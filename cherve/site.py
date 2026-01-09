@@ -160,10 +160,10 @@ def create() -> None:
     config.write_site_config(site_config)
 
     if typer.confirm("Deploy site now?", default=True):
-        deploy(domain)
+        deploy(domain, db_password=db_password)
 
 
-def deploy(domain: str | None = None) -> None:
+def deploy(domain: str | None = None, db_password: str | None = None) -> None:
     system.require_root()
     site_config = _select_site_config(domain)
     server_config = config.read_server_config()
@@ -201,6 +201,7 @@ def deploy(domain: str | None = None) -> None:
         tls_enabled = typer.confirm("Enable TLS with certbot?", default=True)
 
     if env_path.exists():
+        env_values = envfile.parse_env(env_path)
         scheme = "https" if tls_enabled else "http"
         updates = {
             "APP_ENV": "production",
@@ -208,6 +209,14 @@ def deploy(domain: str | None = None) -> None:
             "APP_URL": f"{scheme}://{site_config.domain}",
         }
         if site_config.db_service:
+            resolved_password = db_password or env_values.get("DB_PASSWORD", "")
+            if not resolved_password:
+                user_label = site_config.db_owner_user or "database user"
+                resolved_password = typer.prompt(
+                    f"DB password for {user_label}",
+                    hide_input=True,
+                    confirmation_prompt=False,
+                )
             updates.update(
                 {
                     "DB_CONNECTION": site_config.db_service,
@@ -215,7 +224,7 @@ def deploy(domain: str | None = None) -> None:
                     "DB_PORT": "3306" if site_config.db_service == "mysql" else "",
                     "DB_DATABASE": site_config.db_name or "",
                     "DB_USERNAME": site_config.db_owner_user or "",
-                    "DB_PASSWORD": "",
+                    "DB_PASSWORD": resolved_password,
                 }
             )
         _write_env(site_root, site_config.site_user, updates)
