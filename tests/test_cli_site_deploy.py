@@ -72,7 +72,15 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
     assert env_values["DB_DATABASE"] == "example_db"
     assert any(cmd[:3] == ["git", "-C", str(site_root)] for cmd in run_as_user_calls)
     assert any(
-        cmd[0] == "composer" and "install" in cmd and "--working-dir" in cmd and str(site_root) in cmd
+        cmd
+        == [
+            "composer",
+            "--working-dir",
+            str(site_root),
+            "install",
+            "--no-dev",
+            "--optimize-autoloader",
+        ]
         for cmd in run_as_user_calls
     )
     assert any(cmd[:3] == ["php", "artisan", "key:generate"] for cmd in run_as_user_calls)
