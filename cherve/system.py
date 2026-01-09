@@ -53,43 +53,27 @@ def run(
 
 
 def run_as_user(
-        user: str,
-        argv_or_bash: Sequence[str] | str,
-        check: bool = True,
-        capture: bool = True,
-        env: dict[str, str] | None = None,
-        cwd: str | os.PathLike[str] | None = None,
-        login: bool = False,   # <— opt-in
+    user: str,
+    argv_or_bash: Sequence[str] | str,
+    check: bool = True,
+    capture: bool = True,
+    env: dict[str, str] | None = None,
+    cwd: str | os.PathLike[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    sudo_base = ["sudo"]
-
-    if login:
-        # login shell: sets HOME, loads profile, but also cd's to HOME
-        sudo_base += ["-iu", user]
-    else:
-        # non-login: respects cwd; -H sets HOME to target user's home
-        sudo_base += ["-u", user, "-H"]
-
     if isinstance(argv_or_bash, str):
         if env:
-            env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+            env_prefix = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
             command = f"{env_prefix} {argv_or_bash}"
         else:
             command = argv_or_bash
-
-        # If login=True and you pass cwd, force cd in the shell so you still get the right working dir.
-        if cwd is not None:
-            command = f"cd {shlex.quote(str(cwd))} && {command}"
-
-        argv = [*sudo_base, "bash", "-lc", command]
+        argv = ["sudo", "-iu", user, "bash", "-lc", command]
     else:
         if env:
-            env_assignments = [f"{k}={v}" for k, v in env.items()]
-            argv = [*sudo_base, "--", "env", *env_assignments, *argv_or_bash]
+            env_assignments = [f"{key}={value}" for key, value in env.items()]
+            argv = ["sudo", "-iu", user, "--", "env", *env_assignments, *argv_or_bash]
         else:
-            argv = [*sudo_base, "--", *argv_or_bash]
-
-    return run(argv, check=check, capture=capture, cwd=cwd if not login else None)
+            argv = ["sudo", "-iu", user, "--", *argv_or_bash]
+    return run(argv, check=check, capture=capture, cwd=cwd)
 
 
 def _is_root() -> bool:
