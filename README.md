@@ -47,7 +47,7 @@ This repo ships an `install_cherve.sh` intended for a one-liner install that:
 
 Example:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/channor/cherve/main/install_cherve.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/channor/cherve-server/main/install_cherve.sh | sudo bash
 ```
 
 ### Manual install (developer / testing)
