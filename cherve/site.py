@@ -33,9 +33,10 @@ def _ensure_deploy_key(site_user: str, key_path: Path) -> Path:
     system.run(["chown", "-R", f"{site_user}:{site_user}", str(ssh_dir)])
     if key_path.exists():
         return key_path
+    command = f"ssh-keygen -t ed25519 -f {shlex.quote(str(key_path))} -N \"\""
     system.run_as_user(
         site_user,
-        ["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", ""],
+        command,
         capture=True,
     )
     known_hosts = ssh_dir / "known_hosts"
