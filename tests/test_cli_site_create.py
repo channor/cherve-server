@@ -3,8 +3,9 @@ import subprocess
 
 from typer.testing import CliRunner
 
-from cherve import config, paths
+from cherve import config, paths, system
 from cherve.cli import app
+from cherve.site import _ensure_deploy_key
 
 
 def test_site_create_writes_config_and_key(tmp_path: Path, monkeypatch) -> None:
@@ -61,3 +62,25 @@ def test_site_create_writes_config_and_key(tmp_path: Path, monkeypatch) -> None:
     site_path = paths.SITES_DIR / "microsoft.com.toml"
     loaded = config.read_site_config("microsoft.com", path=site_path)
     assert loaded.domain == "microsoft.com"
+
+
+def test_ensure_deploy_key_passes_empty_passphrase(tmp_path: Path, monkeypatch) -> None:
+    captured: dict[str, object] = {"calls": []}
+
+    def fake_run(argv, *args, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def fake_run_as_user(user, argv_or_bash, *args, **kwargs):
+        captured["user"] = user
+        captured["calls"].append(argv_or_bash)
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(system, "run", fake_run)
+    monkeypatch.setattr(system, "run_as_user", fake_run_as_user)
+
+    key_path = tmp_path / "home" / "amazon" / ".ssh" / "id_cherve_deploy"
+    _ensure_deploy_key("amazon", key_path)
+
+    assert captured["user"] == "amazon"
+    assert all(isinstance(call, str) for call in captured["calls"])
+    assert any('-N ""' in call for call in captured["calls"])
