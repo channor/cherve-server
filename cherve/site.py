@@ -223,8 +223,8 @@ def deploy(domain: str | None = None) -> None:
     if (site_root / "composer.json").exists():
         system.run_as_user(
             site_config.site_user,
-            ["composer", "install", "--no-dev", "--optimize-autoloader"],
-            cwd=str(site_root),
+            ["composer", "--working-dir", str(site_root), "install", "--no-dev", "--optimize-autoloader"],
+            capture=True,
         )
 
     artisan = site_root / "artisan"
