@@ -62,7 +62,7 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
     )
     monkeypatch.setattr("cherve.config.read_server_config", lambda: server_config)
 
-    result = CliRunner().invoke(app, ["site", "deploy", "example.com"])
+    result = CliRunner().invoke(app, ["site", "deploy", "example.com"], input="secret-password\n")
     assert result.exit_code == 0
 
     env_path = site_root / ".env"
@@ -70,6 +70,7 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
     env_values = envfile.parse_env(env_path)
     assert env_values["APP_ENV"] == "production"
     assert env_values["DB_DATABASE"] == "example_db"
+    assert env_values["DB_PASSWORD"] == "secret-password"
     assert any(cmd[:3] == ["git", "-C", str(site_root)] for cmd in run_as_user_calls)
     assert any(
         cmd
