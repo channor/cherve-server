@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
+from importlib import resources
 from typing import Callable, Iterable, Optional, Union
 
 import click
 import typer
 
-from cherve import system
+from cherve import config, paths, system
 
 # -----------------------------
 # Data model (engine + specs)
@@ -176,8 +179,14 @@ def apply_php_fpm_ini_templates(ctx: InstallContext) -> None:
     /etc/php/<ver>/fpm/conf.d/
     Implementation must use importlib.resources (pipx-safe).
     """
-    # implemented later
-    pass
+    if ctx.php_version is None:
+        raise RuntimeError("PHP version is required to apply templates.")
+    target_dir = Path(f"/etc/php/{ctx.php_version}/fpm/conf.d")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("99-php.ini", "99-opcache.ini"):
+        template = resources.files("cherve.templates").joinpath(name)
+        target_path = target_dir / name
+        target_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def nginx_basics(ctx: InstallContext) -> None:
@@ -188,8 +197,46 @@ def nginx_basics(ctx: InstallContext) -> None:
     - nginx -t
     - reload/restart
     """
-    # implemented later
-    pass
+    ui.status("Configuring...")
+    override_dir = Path("/etc/systemd/system/nginx.service.d")
+    override_dir.mkdir(parents=True, exist_ok=True)
+    override_path = override_dir / "override.conf"
+    override_path.write_text("[Service]\nLimitNOFILE=65535\n", encoding="utf-8")
+
+    nginx_conf = Path("/etc/nginx/nginx.conf")
+    conf_text = nginx_conf.read_text(encoding="utf-8")
+    if "server_tokens off;" not in conf_text:
+        updated = _ensure_server_tokens(conf_text)
+        nginx_conf.write_text(updated, encoding="utf-8")
+
+    system.run(["systemctl", "daemon-reload"], capture=not ctx.verbose)
+    system.run(["nginx", "-t"], capture=not ctx.verbose)
+    system.run(["systemctl", "restart", "nginx"], capture=not ctx.verbose)
+
+
+def _ensure_server_tokens(conf_text: str) -> str:
+    http_match = re.search(r"^http\s*\{", conf_text, re.MULTILINE)
+    if not http_match:
+        return conf_text + "\nhttp {\n    server_tokens off;\n}\n"
+    insert_at = http_match.end()
+    return conf_text[:insert_at] + "\n    server_tokens off;" + conf_text[insert_at:]
+
+
+def ensure_ufw_rules_and_enable(ctx: InstallContext) -> None:
+    ui.status("Configuring...")
+    system.run(["ufw", "allow", "22/tcp"], check=False, capture=not ctx.verbose)
+    system.run(["ufw", "allow", "80/tcp"], check=False, capture=not ctx.verbose)
+    system.run(["ufw", "allow", "443/tcp"], check=False, capture=not ctx.verbose)
+    system.run(["ufw", "--force", "enable"], check=False, capture=not ctx.verbose)
+
+
+def configure_fail2ban(ctx: InstallContext) -> None:
+    ui.status("Configuring...")
+    jail_path = Path("/etc/fail2ban/jail.local")
+    if not jail_path.exists():
+        template = resources.files("cherve.templates").joinpath("jail.local")
+        jail_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+    system.run(["systemctl", "enable", "--now", "fail2ban"], check=False, capture=not ctx.verbose)
 
 
 def clamav_post_install(ctx: InstallContext) -> None:
@@ -236,7 +283,7 @@ BASE = GroupSpec(
                 "python3-pip",
             ),
         ),
-        PackageSpec("ufw", apt=("ufw",)),
+        PackageSpec("ufw", apt=("ufw",), post_install=ensure_ufw_rules_and_enable),
         PackageSpec("composer", apt=("composer",)),
     ),
 )
@@ -319,7 +366,7 @@ PHP = GroupSpec(
 OPTIONAL = GroupSpec(
     name="optional",
     children=(
-        PackageSpec("fail2ban", apt=("fail2ban",), default=True),
+        PackageSpec("fail2ban", apt=("fail2ban",), default=True, post_install=configure_fail2ban),
         PackageSpec(
             "clamav",
             apt=("clamav", "clamav-daemon", "clamav-freshclam"),
@@ -330,6 +377,8 @@ OPTIONAL = GroupSpec(
         PackageSpec("supervisor", apt=("supervisor",), default=True),
         PackageSpec("certbot", apt=("certbot", "python3-certbot-nginx"), default=True),
         PackageSpec("npm", apt=("npm",), default=False),
+        PackageSpec("sqlite", apt=("sqlite3",), default=False),
+        PackageSpec("pgsql", apt=("postgresql",), default=False),
     ),
 )
 
@@ -339,3 +388,47 @@ PLAN: tuple[Spec, ...] = (
     PHP,
     OPTIONAL,
 )
+
+
+def install() -> None:
+    system.require_root()
+    ctx = InstallContext()
+    selections = _select_specs(PLAN)
+    for spec in selections:
+        ui.step(f"Checking {spec.name}...")
+        missing = [pkg for pkg in spec.apt if not system.is_installed_apt(pkg)]
+        if not missing:
+            ui.status("Already installed")
+            if spec.post_install:
+                ui.status("Configuring...")
+                spec.post_install(ctx)
+                ui.ok()
+            continue
+
+        if spec.pre_install:
+            ui.status("Preparing...")
+            spec.pre_install(ctx)
+        _install_apt_packages(ctx, _dedupe_keep_order(missing))
+        if spec.service:
+            _enable_service(spec.service, ctx)
+        if spec.post_install:
+            ui.status("Configuring...")
+            spec.post_install(ctx)
+        ui.ok()
+
+    php_spec = next((spec for spec in selections if spec.name.startswith("php")), None)
+    if php_spec is None or ctx.php_version is None:
+        raise RuntimeError("PHP selection is required.")
+
+    server_config = config.ServerConfig(
+        php_version=f"php{ctx.php_version}",
+        fpm_service=php_spec.service or f"php{ctx.php_version}-fpm",
+        fpm_sock=f"/run/php/php{ctx.php_version}-fpm.sock",
+        nginx_sites_available=str(paths.NGINX_SITES_AVAILABLE),
+        nginx_sites_enabled=str(paths.NGINX_SITES_ENABLED),
+        mysql_installed=system.is_installed_apt("mysql-server"),
+        pqsql_installed=system.is_installed_apt("postgresql"),
+        sqlite_installed=system.is_installed_apt("sqlite3"),
+        certbot_installed=system.is_installed_apt("certbot"),
+    )
+    config.write_server_config(server_config)
