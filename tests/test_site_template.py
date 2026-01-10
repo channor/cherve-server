@@ -23,18 +23,30 @@ def test_nginx_template_render(tmp_path: Path, monkeypatch) -> None:
         domain="example.com",
         site_user="example",
         site_root="/var/www/example.com",
+        site_app_root="/var/www/example.com/_cherve/app",
         site_www_root="/var/www/example.com/public",
+        site_landing_root="/var/www/example.com/_cherve/landing",
         repo_ssh="git@github.com:ORG/REPO.git",
         branch="main",
         with_www=True,
         email="",
+        mode="landing",
+        tls_enabled=False,
+        ssl_certificate="",
+        ssl_certificate_key="",
         db_service=None,
         db_name=None,
         db_owner_user=None,
     )
 
     monkeypatch.setattr("cherve.site.system.run", lambda *args, **kwargs: None)
-    _render_nginx_config(site_config, server_config, client_max_body_size="32m")
+    _render_nginx_config(
+        site_config,
+        server_config,
+        template_name="nginx_php_app.conf",
+        root_path=site_config.site_www_root,
+        client_max_body_size="32m",
+    )
 
     config_path = sites_available / "example.com.conf"
     assert config_path.exists()

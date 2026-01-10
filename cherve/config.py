@@ -30,11 +30,17 @@ class SiteConfig:
     domain: str
     site_user: str
     site_root: str
+    site_app_root: str
     site_www_root: str
+    site_landing_root: str
     repo_ssh: str
     branch: str
     with_www: bool
     email: str
+    mode: str
+    tls_enabled: bool
+    ssl_certificate: str
+    ssl_certificate_key: str
     db_service: str | None
     db_name: str | None
     db_owner_user: str | None
@@ -114,6 +120,11 @@ def write_site_config(config: SiteConfig, path: Path | None = None) -> None:
     if path is None:
         path = paths.SITES_DIR / f"{config.domain}.toml"
     data = asdict(config)
+    data["tls"] = {
+        "enabled": data.pop("tls_enabled"),
+        "ssl_certificate": data.pop("ssl_certificate"),
+        "ssl_certificate_key": data.pop("ssl_certificate_key"),
+    }
     _atomic_write(path, _toml_dumps(data))
 
 
@@ -121,15 +132,26 @@ def read_site_config(domain: str, path: Path | None = None) -> SiteConfig:
     if path is None:
         path = paths.SITES_DIR / f"{domain}.toml"
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    site_root = raw["site_root"]
+    app_root = raw.get("site_app_root") or str(Path(site_root) / "_cherve" / "app")
+    landing_root = raw.get("site_landing_root") or str(Path(site_root) / "_cherve" / "landing")
+    www_root = raw.get("site_www_root") or str(Path(app_root) / "public")
+    tls_raw = raw.get("tls", {})
     return SiteConfig(
         domain=raw["domain"],
         site_user=raw["site_user"],
-        site_root=raw["site_root"],
-        site_www_root=raw["site_www_root"],
-        repo_ssh=raw["repo_ssh"],
-        branch=raw["branch"],
-        with_www=raw["with_www"],
+        site_root=site_root,
+        site_app_root=app_root,
+        site_www_root=www_root,
+        site_landing_root=landing_root,
+        repo_ssh=raw.get("repo_ssh", ""),
+        branch=raw.get("branch", "main"),
+        with_www=raw.get("with_www", False),
         email=raw.get("email", ""),
+        mode=raw.get("mode", "landing"),
+        tls_enabled=tls_raw.get("enabled", False),
+        ssl_certificate=tls_raw.get("ssl_certificate", ""),
+        ssl_certificate_key=tls_raw.get("ssl_certificate_key", ""),
         db_service=raw.get("db_service"),
         db_name=raw.get("db_name"),
         db_owner_user=raw.get("db_owner_user"),

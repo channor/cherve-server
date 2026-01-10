@@ -62,6 +62,8 @@ def test_site_create_writes_config_and_key(tmp_path: Path, monkeypatch) -> None:
     site_path = paths.SITES_DIR / "microsoft.com.toml"
     loaded = config.read_site_config("microsoft.com", path=site_path)
     assert loaded.domain == "microsoft.com"
+    assert loaded.mode == "landing"
+    assert loaded.site_app_root.endswith("/_cherve/app")
 
 
 def test_ensure_deploy_key_passes_empty_passphrase(tmp_path: Path, monkeypatch) -> None:

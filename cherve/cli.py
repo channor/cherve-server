@@ -6,9 +6,11 @@ from cherve import site as site_module
 app = typer.Typer(no_args_is_help=True)
 server = typer.Typer(no_args_is_help=True)
 site = typer.Typer(no_args_is_help=True)
+site_tls = typer.Typer(no_args_is_help=True)
 
 app.add_typer(server, name="server")
 app.add_typer(site, name="site")
+site.add_typer(site_tls, name="tls")
 
 @server.command("install")
 def server_install():
@@ -26,6 +28,24 @@ def site_create():
 def site_deploy(domain: str = typer.Argument(None)):
     """Deploy site (stub)."""
     site_module.deploy(domain)
+    raise typer.Exit(code=0)
+
+@site.command("activate")
+def site_activate(domain: str = typer.Argument(None)):
+    """Activate site."""
+    site_module.activate(domain)
+    raise typer.Exit(code=0)
+
+@site.command("deactivate")
+def site_deactivate(domain: str = typer.Argument(None)):
+    """Deactivate site."""
+    site_module.deactivate(domain)
+    raise typer.Exit(code=0)
+
+@site_tls.command("enable")
+def site_tls_enable(domain: str = typer.Argument(None)):
+    """Enable TLS."""
+    site_module.tls_enable(domain)
     raise typer.Exit(code=0)
 
 def main():
