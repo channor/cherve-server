@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import secrets
+import shlex
+import shutil
+from dataclasses import replace
 from importlib import resources
 from pathlib import Path
 
 import click
-import shlex
 import typer
 
 from cherve import config, envfile, paths, system
@@ -22,9 +24,27 @@ def _ensure_site_user(username: str) -> None:
     system.run(["passwd", "-l", username], check=False)
 
 
-def _ensure_site_root(site_root: Path, site_user: str) -> None:
+def _ensure_site_layout(site_root: Path, site_user: str) -> tuple[Path, Path, Path]:
     site_root.mkdir(parents=True, exist_ok=True)
+    app_root = site_root / "_cherve" / "app"
+    landing_root = site_root / "_cherve" / "landing"
+    www_root = app_root / "public"
+    app_root.mkdir(parents=True, exist_ok=True)
+    landing_root.mkdir(parents=True, exist_ok=True)
     system.run(["chown", "-R", f"{site_user}:{site_user}", str(site_root)])
+    return app_root, www_root, landing_root
+
+
+def _ensure_landing_page(landing_root: Path, site_user: str) -> None:
+    index_path = landing_root / "index.html"
+    if index_path.exists():
+        return
+    index_path.write_text(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Coming soon</title>"
+        "</head><body><h1>Coming soon</h1><p>This site is not yet available.</p></body></html>\n",
+        encoding="utf-8",
+    )
+    system.run(["chown", f"{site_user}:{site_user}", str(index_path)])
 
 
 def _ensure_deploy_key(site_user: str, key_path: Path) -> Path:
@@ -81,16 +101,41 @@ def _write_env(site_root: Path, site_user: str, updates: dict[str, str]) -> None
     env_path = site_root / ".env"
     envfile.update_env_file(env_path, updates)
     system.run(["chown", f"{site_user}:{site_user}", str(env_path)])
-    env_path.chmod(0o640)
+    env_path.chmod(0o600)
+
+
+def _server_names(site_config: config.SiteConfig) -> list[str]:
+    names = [site_config.domain]
+    if site_config.with_www:
+        names.append(f"www.{site_config.domain}")
+    return names
+
+
+def _migrate_v1_repo(site_config: config.SiteConfig) -> config.SiteConfig:
+    site_root = Path(site_config.site_root)
+    app_root = Path(site_config.site_app_root)
+    landing_root = Path(site_config.site_landing_root)
+    if app_root.exists() or not (site_root / ".git").exists():
+        return site_config
+
+    typer.echo("Detected v1 layout, migrating repo into _cherve/app.")
+    app_root.mkdir(parents=True, exist_ok=True)
+    for entry in site_root.iterdir():
+        if entry.name == "_cherve":
+            continue
+        shutil.move(str(entry), str(app_root / entry.name))
+    _ensure_landing_page(landing_root, site_config.site_user)
+    config.write_site_config(site_config)
+    return site_config
 
 
 def create() -> None:
     system.require_root()
     server_config = config.read_server_config()
-    username = typer.prompt("Linux username")
+    site_name = typer.prompt("Site name")
     domain = typer.prompt("Domain")
     email = typer.prompt("Email (optional)", default="")
-    repo_ssh = typer.prompt("Repo SSH URL")
+    repo_ssh = typer.prompt("Repo SSH URL (optional)", default="")
     branch = typer.prompt("Branch", default="main")
     with_www = typer.confirm("Include www subdomain?", default=True)
 
@@ -114,26 +159,27 @@ def create() -> None:
             default="mysql" if "mysql" in db_services else db_services[0],
             type=click.Choice(db_services, case_sensitive=False),
         )
-        db_name = typer.prompt("DB name", default=f"{username}_{_random_suffix()}")
+        db_name = typer.prompt("DB name", default=f"{site_name}_{_random_suffix()}")
         create_db_user = typer.confirm("Create DB owner user?", default=True)
         if create_db_user:
-            db_owner_user = typer.prompt("DB owner username", default=f"{username}_db_owner")
+            db_owner_user = typer.prompt("DB owner username", default=f"{site_name}_db_owner")
             db_password = secrets.token_urlsafe(16)
             typer.echo(f"DB owner password: {db_password}")
 
     site_root = paths.WWW_ROOT / domain
-    _ensure_site_user(username)
-    _ensure_site_root(site_root, username)
+    _ensure_site_user(site_name)
+    site_app_root, site_www_root, site_landing_root = _ensure_site_layout(site_root, site_name)
+    _ensure_landing_page(site_landing_root, site_name)
 
-    key_path = paths.HOME_ROOT / username / ".ssh" / "id_cherve_deploy"
-    _ensure_deploy_key(username, key_path)
+    key_path = paths.HOME_ROOT / site_name / ".ssh" / "id_cherve_deploy"
+    _ensure_deploy_key(site_name, key_path)
     pub_key = key_path.with_suffix(".pub").read_text(encoding="utf-8")
     typer.echo("Deploy key (add to GitHub):")
     typer.echo(pub_key)
 
     if typer.confirm("Have you added the deploy key to GitHub?", default=False):
         system.run_as_user(
-            username,
+            site_name,
             "ssh -T git@github.com",
             env=_git_env_for_key(key_path),
             check=False,
@@ -143,36 +189,52 @@ def create() -> None:
     if create_db and db_service == "mysql" and db_name and db_owner_user and db_password:
         _create_mysql_db(db_name, db_owner_user, db_password)
 
-    site_www_root = site_root / "public"
     site_config = config.SiteConfig(
         domain=domain,
-        site_user=username,
+        site_user=site_name,
         site_root=str(site_root),
+        site_app_root=str(site_app_root),
         site_www_root=str(site_www_root),
+        site_landing_root=str(site_landing_root),
         repo_ssh=repo_ssh,
         branch=branch,
         with_www=with_www,
         email=email,
+        mode="landing",
+        tls_enabled=False,
+        ssl_certificate="",
+        ssl_certificate_key="",
         db_service=db_service,
         db_name=db_name,
         db_owner_user=db_owner_user,
     )
     config.write_site_config(site_config)
 
-    if typer.confirm("Deploy site now?", default=True):
-        deploy(domain, db_password=db_password)
+    _render_nginx_config(
+        site_config,
+        server_config,
+        template_name="nginx_landing.conf",
+        root_path=site_config.site_landing_root,
+    )
+
+    if typer.confirm("Enable TLS now? (DNS must point to this server)", default=False):
+        tls_enable(domain)
 
 
 def deploy(domain: str | None = None, db_password: str | None = None) -> None:
     system.require_root()
     site_config = _select_site_config(domain)
-    server_config = config.read_server_config()
-    site_root = Path(site_config.site_root)
+    site_config = _migrate_v1_repo(site_config)
+    site_root = Path(site_config.site_app_root)
     key_path = paths.HOME_ROOT / site_config.site_user / ".ssh" / "id_cherve_deploy"
     git_env = _git_env_for_key(key_path)
 
-    if not site_root.exists():
-        site_root.mkdir(parents=True, exist_ok=True)
+    if not site_config.repo_ssh:
+        repo_ssh = typer.prompt("Repo SSH URL")
+        site_config = replace(site_config, repo_ssh=repo_ssh)
+        config.write_site_config(site_config)
+
+    site_root.mkdir(parents=True, exist_ok=True)
 
     if not (site_root / ".git").exists():
         system.run_as_user(
@@ -196,13 +258,9 @@ def deploy(domain: str | None = None, db_password: str | None = None) -> None:
         else:
             typer.echo("Warning: No .env template found.")
 
-    tls_enabled = False
-    if server_config.certbot_installed:
-        tls_enabled = typer.confirm("Enable TLS with certbot?", default=True)
-
     if env_path.exists():
         env_values = envfile.parse_env(env_path)
-        scheme = "https" if tls_enabled else "http"
+        scheme = "https" if site_config.tls_enabled else "http"
         updates = {
             "APP_ENV": "production",
             "APP_DEBUG": "false",
@@ -258,31 +316,126 @@ def deploy(domain: str | None = None, db_password: str | None = None) -> None:
                 check=False,
             )
 
-    _render_nginx_config(site_config, server_config)
 
-    if tls_enabled:
-        domains = [site_config.domain]
-        if site_config.with_www:
-            domains.append(f"www.{site_config.domain}")
-        system.run(["certbot", "--nginx", "-d", ",".join(domains)], check=False)
-        system.run(["nginx", "-t"], check=False)
-        system.run(["systemctl", "reload", "nginx"], check=False)
+def activate(domain: str | None = None) -> None:
+    system.require_root()
+    site_config = _select_site_config(domain)
+    server_config = config.read_server_config()
+    site_config = _migrate_v1_repo(site_config)
+    _render_nginx_config(
+        site_config,
+        server_config,
+        template_name="nginx_php_app.conf",
+        root_path=site_config.site_www_root,
+        client_max_body_size="20m",
+    )
+    updated = replace(site_config, mode="app")
+    config.write_site_config(updated)
+
+
+def deactivate(domain: str | None = None) -> None:
+    system.require_root()
+    site_config = _select_site_config(domain)
+    server_config = config.read_server_config()
+    site_config = _migrate_v1_repo(site_config)
+    _render_nginx_config(
+        site_config,
+        server_config,
+        template_name="nginx_landing.conf",
+        root_path=site_config.site_landing_root,
+    )
+    updated = replace(site_config, mode="landing")
+    config.write_site_config(updated)
+
+
+def tls_enable(domain: str | None = None) -> None:
+    system.require_root()
+    site_config = _select_site_config(domain)
+    if not typer.confirm("Confirm DNS is pointed at this server", default=False):
+        return
+    email = site_config.email or typer.prompt("Email for Let's Encrypt")
+    domains = _server_names(site_config)
+    cert_paths = {
+        "ssl_certificate": f"/etc/letsencrypt/live/{site_config.domain}/fullchain.pem",
+        "ssl_certificate_key": f"/etc/letsencrypt/live/{site_config.domain}/privkey.pem",
+    }
+    system.run(
+        [
+            "certbot",
+            "--nginx",
+            "--redirect",
+            "-m",
+            email,
+            "--agree-tos",
+            *[value for domain_name in domains for value in ("-d", domain_name)],
+        ],
+        check=False,
+    )
+    updated = replace(
+        site_config,
+        email=email,
+        tls_enabled=True,
+        ssl_certificate=cert_paths["ssl_certificate"],
+        ssl_certificate_key=cert_paths["ssl_certificate_key"],
+    )
+    config.write_site_config(updated)
+    system.run(["nginx", "-t"], capture=True)
+    system.run(["systemctl", "reload", "nginx"], capture=True)
 
 
 def _render_nginx_config(
     site_config: config.SiteConfig,
     server_config: config.ServerConfig,
+    template_name: str,
+    root_path: str,
     client_max_body_size: str = "20m",
 ) -> None:
-    template = resources.files("cherve.templates").joinpath("nginx_site.conf")
-    server_names = [site_config.domain]
-    if site_config.with_www:
-        server_names.append(f"www.{site_config.domain}")
+    template = resources.files("cherve.templates").joinpath(template_name)
+    server_names = " ".join(_server_names(site_config))
+    https_redirect = ""
+    if site_config.tls_enabled:
+        https_redirect = 'if ($scheme != "https") { return 301 https://$host$request_uri; }'
+    ssl_block = ""
+    if site_config.tls_enabled and site_config.ssl_certificate and site_config.ssl_certificate_key:
+        ssl_block = (
+            "server {{\n"
+            "    listen 443 ssl http2;\n"
+            f"    server_name {server_names};\n"
+            f"    ssl_certificate {site_config.ssl_certificate};\n"
+            f"    ssl_certificate_key {site_config.ssl_certificate_key};\n"
+            f"    root {root_path};\n"
+            "    index index.php index.html index.htm;\n"
+            "    client_max_body_size {client_max_body_size};\n"
+            "    {app_block}\n"
+            "}}\n"
+        )
+    app_block = ""
+    if "php" in template_name:
+        app_block = (
+            "    location / {\n"
+            "        try_files $uri $uri/ /index.php?$query_string;\n"
+            "    }\n"
+            "    location ~ \\.php$ {\n"
+            "        include snippets/fastcgi-php.conf;\n"
+            f"        fastcgi_pass unix:{server_config.fpm_sock};\n"
+            "    }\n"
+        )
+    safe_app_block = app_block.replace("{", "{{").replace("}", "}}")
     rendered = template.read_text(encoding="utf-8").format(
-        server_name=" ".join(server_names),
-        root_path=site_config.site_www_root,
+        server_name=server_names,
+        root_path=root_path,
         php_fpm_sock=server_config.fpm_sock,
         client_max_body_size=client_max_body_size,
+        https_redirect=https_redirect,
+        ssl_block=ssl_block.format(
+            server_name=server_names,
+            root_path=root_path,
+            client_max_body_size=client_max_body_size,
+            app_block=safe_app_block,
+        )
+        if ssl_block
+        else "",
+        app_block=app_block,
     )
     sites_available = Path(server_config.nginx_sites_available)
     sites_enabled = Path(server_config.nginx_sites_enabled)

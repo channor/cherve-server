@@ -26,7 +26,7 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(paths, "SITES_DIR", tmp_path / "etc" / "sites.d")
     monkeypatch.setattr(paths, "HOME_ROOT", tmp_path / "home")
 
-    site_root = tmp_path / "site"
+    site_root = tmp_path / "site" / "_cherve" / "app"
     site_root.mkdir(parents=True, exist_ok=True)
     (site_root / ".git").mkdir()
     (site_root / ".env.example").write_text("APP_NAME=Test\n", encoding="utf-8")
@@ -36,31 +36,24 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
     site_config = config.SiteConfig(
         domain="example.com",
         site_user="example",
-        site_root=str(site_root),
+        site_root=str(tmp_path / "site"),
+        site_app_root=str(site_root),
         site_www_root=str(site_root / "public"),
+        site_landing_root=str(tmp_path / "site" / "_cherve" / "landing"),
         repo_ssh="git@github.com:ORG/REPO.git",
         branch="main",
         with_www=False,
         email="",
+        mode="landing",
+        tls_enabled=False,
+        ssl_certificate="",
+        ssl_certificate_key="",
         db_service="mysql",
         db_name="example_db",
         db_owner_user="example_user",
     )
     paths.SITES_DIR.mkdir(parents=True, exist_ok=True)
     config.write_site_config(site_config, path=paths.SITES_DIR / "example.com.toml")
-
-    server_config = config.ServerConfig(
-        php_version="php8.3",
-        fpm_service="php8.3-fpm",
-        fpm_sock="/run/php/php8.3-fpm.sock",
-        nginx_sites_available=str(tmp_path / "nginx" / "sites-available"),
-        nginx_sites_enabled=str(tmp_path / "nginx" / "sites-enabled"),
-        mysql_installed=True,
-        pqsql_installed=False,
-        sqlite_installed=False,
-        certbot_installed=False,
-    )
-    monkeypatch.setattr("cherve.config.read_server_config", lambda: server_config)
 
     result = CliRunner().invoke(app, ["site", "deploy", "example.com"], input="secret-password\n")
     assert result.exit_code == 0
@@ -85,3 +78,4 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
         for cmd in run_as_user_calls
     )
     assert any(cmd[:3] == ["php", "artisan", "key:generate"] for cmd in run_as_user_calls)
+    assert not any(cmd[0] in {"nginx", "certbot"} for cmd in run_calls)
