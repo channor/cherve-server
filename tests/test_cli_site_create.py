@@ -40,7 +40,6 @@ def test_site_create_writes_config_and_key(tmp_path: Path, monkeypatch) -> None:
     input_data = "\n".join(
         [
             "microsoft",
-            "microsoft.com",
             "",
             "git@github.com:ORG/REPO.git",
             "",
@@ -49,8 +48,6 @@ def test_site_create_writes_config_and_key(tmp_path: Path, monkeypatch) -> None:
             "",
             "",
             "",
-            "",
-            "n",
             "n",
         ]
     )
@@ -59,11 +56,12 @@ def test_site_create_writes_config_and_key(tmp_path: Path, monkeypatch) -> None:
     assert "Deploy key" in result.output
     assert "DB owner password" in result.output
 
-    site_path = paths.SITES_DIR / "microsoft.com.toml"
-    loaded = config.read_site_config("microsoft.com", path=site_path)
-    assert loaded.domain == "microsoft.com"
+    site_path = paths.SITES_DIR / "microsoft.toml"
+    loaded = config.read_site_config("microsoft", path=site_path)
+    assert loaded.site_name == "microsoft"
     assert loaded.mode == "landing"
     assert loaded.site_app_root.endswith("/_cherve/app")
+    assert loaded.domains == []
 
 
 def test_ensure_deploy_key_passes_empty_passphrase(tmp_path: Path, monkeypatch) -> None:

@@ -29,7 +29,7 @@ Cherve **v1** exists and works (server install + site create + site deploy) but 
 - **v2 behavior (required):**
   - `cherve site deploy` does **only**: git clone/pull + env + composer + artisan (+ optional asset build).  
     ✅ **No nginx writes. No certbot. No HTTPS forcing.**
-  - `cherve site create` sets up first domain and **landing nginx** immediately, and may optionally run TLS *only if DNS already points here*.
+  - `cherve site create` sets up the site container only; domains and nginx configs are handled by `cherve domain add`.
   - `cherve site activate` switches nginx from landing → app.
   - `cherve site deactivate` switches nginx from app → landing.
   - `cherve site tls enable` handles certbot issuance and HTTPS redirect enforcement.
@@ -37,23 +37,23 @@ Cherve **v1** exists and works (server install + site create + site deploy) but 
 ### 2) Avoid “domain folder is git repo”
 - **v1 behavior:** repo cloned into `/var/www/<domain>` (site_root). This conflicts with having any landing content there.
 - **v2 behavior (required):** create a managed layout under `_cherve`:
-  - `site_root = /var/www/<domain>/`
-  - `site_app_root = /var/www/<domain>/_cherve/app/`  ✅ git clone/pull happens here
-  - `site_www_root = /var/www/<domain>/_cherve/app/public` (Laravel default; configurable)
-  - `site_landing_root = /var/www/<domain>/_cherve/landing/` ✅ “under construction” page lives here
+  - `site_root = /var/www/<site_name>/`
+  - `site_app_root = /var/www/<site_name>/_cherve/app/`  ✅ git clone/pull happens here
+  - `site_www_root = /var/www/<site_name>/_cherve/app/public` (Laravel default; configurable)
+  - `site_landing_root = /var/www/<site_name>/_cherve/landing/` ✅ “under construction” page lives here
 - Nginx points either to `site_landing_root` (landing) or to `site_www_root` (app).
 
 ### 3) TLS is not tied to deploy
 - **v1 behavior:** “Request TLS?” prompt lived in deploy.
 - **v2 behavior:** TLS is **separate**:
-  - `site tls enable` runs certbot and records `tls.enabled=true` in site config.
-  - `site activate/deactivate` (and landing/app templates) should respect `tls.enabled` to enforce HTTPS redirects.
+  - `site tls enable` runs certbot and records `tls_enabled=true` for the selected domain in site config.
+  - `site activate/deactivate` (and landing/app templates) should respect domain TLS settings to enforce HTTPS redirects.
 
 ### 4) Site vs domains (future-proofing)
-- v2 still stores configs as `/etc/cherve/sites.d/<domain>.toml`, but must treat:
-  - “site” (container) as the thing being deployed/activated/tls-enabled
+- v2 stores configs as `/etc/cherve/sites.d/<site_name>.toml`, but must treat:
+  - “site” (container) as the thing being deployed/activated
   - “domain” as a routing identifier
-- For v2, keep **one primary domain** per site (good enough), but design config so multiple domains can be added later.
+- For v2, allow **multiple domains** per site, and ensure each domain has its own nginx config file.
 
 ---
 
@@ -65,18 +65,15 @@ Cherve **v1** exists and works (server install + site create + site deploy) but 
 Still installs packages and writes `/etc/cherve/server.toml`. (Mostly unchanged from v1.)
 
 #### `cherve site create`
-Provision a site container and immediately create an **nginx landing** for the first domain.
+Provision a site container and wait for domains to be attached via `cherve domain add`.
 
 Must:
 - Create user (password disabled). v1 prompts for "Linux Username", v2 changes this to "Site name"
-- Create directory layout under `/var/www/<domain>/_cherve/`
+- Create directory layout under `/var/www/<site_name>/_cherve/`
 - Generate deploy key
-- Write site config `/etc/cherve/sites.d/<domain>.toml`
-- Write nginx config for **landing** and enable it (validate + reload)
-- Prompt: “Enable TLS now? (DNS must point to this server)” (default **No**)
-  - If yes: run `cherve site tls enable <domain>` flow
+- Write site config `/etc/cherve/sites.d/<site_name>.toml`
 
-#### `cherve site deploy [domain]`
+#### `cherve site deploy [site_name]`
 Only deploy code into `site_app_root`.
 
 Must:
@@ -85,8 +82,8 @@ Must:
 - Run composer/artisan
 - **Must not** modify nginx or certbot
 
-#### `cherve site activate [domain]`
-Switch nginx from landing → app.
+#### `cherve site activate [site_name]`
+Switch nginx from landing → app for all domains.
 
 Must:
 - Render app nginx config pointing to `site_www_root`
@@ -94,15 +91,15 @@ Must:
 - Validate nginx, reload
 - Set `mode="app"` in site config
 
-#### `cherve site deactivate [domain]`
-Switch nginx from app → landing.
+#### `cherve site deactivate [site_name]`
+Switch nginx from app → landing for all domains.
 
 Must:
 - Render landing nginx config pointing to `site_landing_root`
 - Validate nginx, reload
 - Set `mode="landing"` in site config
 
-#### `cherve site tls enable [domain]`
+#### `cherve site tls enable [site_name] [domain]`
 Issue TLS cert via certbot and enforce redirects.
 
 Must:
@@ -112,6 +109,16 @@ Must:
 - Record TLS enabled in site config
 - Write SSL file paths to config
 - Reload nginx
+
+#### `cherve domain add [site_name] [domain]`
+Attach a domain to a site, create its nginx config, and optionally enable TLS for that domain.
+
+Must:
+- Prompt/select site + domain when arguments are omitted
+- Ask whether to include www subdomain
+- Render landing or app nginx config (depending on site mode)
+- Validate nginx, reload
+- Optionally run certbot and update TLS fields for that domain
 
 ---
 
@@ -148,11 +155,11 @@ Must include:
 - nginx paths (sites-available / sites-enabled)
 - features installed: mysql/certbot/etc
 
-### Site config: `/etc/cherve/sites.d/<domain>.toml`
+### Site config: `/etc/cherve/sites.d/<site_name>.toml`
 Written by `cherve site create`.
 
 **v2 required keys (minimum):**
-- `domain` (primary domain)
+- `site_name`
 - `site_user`
 - `site_root`
 - `site_app_root`
@@ -160,12 +167,14 @@ Written by `cherve site create`.
 - `site_landing_root`
 - `repo_ssh` (optional at create-time; required at deploy-time)
 - `branch` (default main)
-- `with_www` (bool)
 - `email` (optional)
 - `mode = "landing" | "app"`
-- `tls.enabled = true/false`
-- `ssl_certificate`
-- `ssl_certificate_key`
+- `domains` (list of domain entries)
+  - `name`
+  - `with_www`
+  - `tls_enabled`
+  - `ssl_certificate`
+  - `ssl_certificate_key`
 - `db.*` metadata (no passwords)
 
 ---
@@ -183,7 +192,7 @@ Maintain these templates:
 
 Both templates must support:
 - `server_name` (domain + optional www)
-- optional HTTPS redirect behavior if `tls.enabled` is true
+- optional HTTPS redirect behavior if `tls_enabled` is true (per domain)
 
 Always:
 - write config into sites-available
@@ -204,8 +213,8 @@ Then set/overwrite managed keys:
 - `APP_ENV=production`
 - `APP_DEBUG=false`
 - `APP_URL`:
-  - `https://<domain>` if `tls.enabled==true`
-  - else `http://<domain>`
+  - `https://<primary-domain>` if `tls_enabled==true`
+  - else `http://<primary-domain>`
 - DB keys from site config (prompt for DB password if needed)
 
 Permissions:
@@ -269,8 +278,8 @@ If an existing v1 site has repo directly in `/var/www/<domain>`:
 
 - v2 must either:
   1) migrate automatically:
-    - move current repo to `/var/www/<domain>/_cherve/app`
-    - set new roots in site config
+    - move current repo to `/var/www/<site_name>/_cherve/app`
+    - set new roots in site config (site name may be derived from the old domain)
     - write landing dir + template
       **or**
   2) declare “manual migration required” and provide a command later (`cherve site migrate`).
@@ -297,7 +306,7 @@ Pick one strategy and document it. Prefer explicit and safe.
 #### site create
 - creates user + directories
 - writes site config with app/landing roots
-- creates landing nginx config and reloads nginx (mock)
+- does not write nginx until a domain is added
 - mode defaults to landing
 
 #### site deploy
@@ -307,13 +316,18 @@ Pick one strategy and document it. Prefer explicit and safe.
 - does not touch nginx/certbot
 
 #### site activate/deactivate
-- toggles nginx config root correctly
+- toggles nginx config root correctly for all domains
 - updates site config mode
 - validates + reloads nginx (mock)
 
 #### site tls enable
 - runs certbot with correct args (mock)
-- sets tls.enabled=true
+- sets tls_enabled=true for the selected domain
 - reloads nginx (mock)
+
+#### domain add
+- adds domain entry to the site config
+- writes nginx config for the domain (mocked reload)
+- optional TLS enable flow
 
 ---

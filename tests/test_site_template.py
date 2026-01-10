@@ -20,20 +20,25 @@ def test_nginx_template_render(tmp_path: Path, monkeypatch) -> None:
         certbot_installed=False,
     )
     site_config = config.SiteConfig(
-        domain="example.com",
+        site_name="example",
         site_user="example",
-        site_root="/var/www/example.com",
-        site_app_root="/var/www/example.com/_cherve/app",
-        site_www_root="/var/www/example.com/public",
-        site_landing_root="/var/www/example.com/_cherve/landing",
+        site_root="/var/www/example",
+        site_app_root="/var/www/example/_cherve/app",
+        site_www_root="/var/www/example/public",
+        site_landing_root="/var/www/example/_cherve/landing",
         repo_ssh="git@github.com:ORG/REPO.git",
         branch="main",
-        with_www=True,
         email="",
         mode="landing",
-        tls_enabled=False,
-        ssl_certificate="",
-        ssl_certificate_key="",
+        domains=[
+            config.DomainConfig(
+                name="example.com",
+                with_www=True,
+                tls_enabled=False,
+                ssl_certificate="",
+                ssl_certificate_key="",
+            )
+        ],
         db_service=None,
         db_name=None,
         db_owner_user=None,
@@ -42,6 +47,7 @@ def test_nginx_template_render(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("cherve.site.system.run", lambda *args, **kwargs: None)
     _render_nginx_config(
         site_config,
+        site_config.domains[0],
         server_config,
         template_name="nginx_php_app.conf",
         root_path=site_config.site_www_root,
@@ -52,6 +58,6 @@ def test_nginx_template_render(tmp_path: Path, monkeypatch) -> None:
     assert config_path.exists()
     text = config_path.read_text(encoding="utf-8")
     assert "server_name example.com www.example.com;" in text
-    assert "root /var/www/example.com/public;" in text
+    assert "root /var/www/example/public;" in text
     assert "fastcgi_pass unix:/run/php/php8.3-fpm.sock;" in text
     assert "client_max_body_size 32m;" in text
