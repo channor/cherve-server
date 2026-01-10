@@ -72,9 +72,9 @@ def _git_env_for_key(key_path: Path) -> dict[str, str]:
     return {"GIT_SSH_COMMAND": f"ssh -i {key_path} -o IdentitiesOnly=yes"}
 
 
-def _select_site_config(domain: str | None) -> config.SiteConfig:
-    if domain:
-        return config.read_site_config(domain)
+def _select_site_config(site_name: str | None) -> config.SiteConfig:
+    if site_name:
+        return config.read_site_config(site_name)
     paths.SITES_DIR.mkdir(parents=True, exist_ok=True)
     options = [p.stem for p in paths.SITES_DIR.glob("*.toml")]
     if not options:
@@ -104,11 +104,36 @@ def _write_env(site_root: Path, site_user: str, updates: dict[str, str]) -> None
     env_path.chmod(0o600)
 
 
-def _server_names(site_config: config.SiteConfig) -> list[str]:
-    names = [site_config.domain]
-    if site_config.with_www:
-        names.append(f"www.{site_config.domain}")
+def _server_names(domain_config: config.DomainConfig) -> list[str]:
+    names = [domain_config.name]
+    if domain_config.with_www:
+        names.append(f"www.{domain_config.name}")
     return names
+
+
+def _primary_domain(site_config: config.SiteConfig) -> config.DomainConfig | None:
+    return site_config.domains[0] if site_config.domains else None
+
+
+def _select_domain(
+    site_config: config.SiteConfig, domain_name: str | None
+) -> tuple[config.DomainConfig, int]:
+    if domain_name:
+        for index, domain in enumerate(site_config.domains):
+            if domain.name == domain_name:
+                return domain, index
+        raise RuntimeError(f"Domain {domain_name} not found in site {site_config.site_name}.")
+    if not site_config.domains:
+        raise RuntimeError("No domains configured for this site.")
+    choice = typer.prompt(
+        "Select domain",
+        type=click.Choice([domain.name for domain in site_config.domains], case_sensitive=False),
+        default=site_config.domains[0].name,
+    )
+    for index, domain in enumerate(site_config.domains):
+        if domain.name == choice:
+            return domain, index
+    raise RuntimeError("Selected domain not found.")
 
 
 def _migrate_v1_repo(site_config: config.SiteConfig) -> config.SiteConfig:
@@ -133,11 +158,9 @@ def create() -> None:
     system.require_root()
     server_config = config.read_server_config()
     site_name = typer.prompt("Site name")
-    domain = typer.prompt("Domain")
     email = typer.prompt("Email (optional)", default="")
     repo_ssh = typer.prompt("Repo SSH URL (optional)", default="")
     branch = typer.prompt("Branch", default="main")
-    with_www = typer.confirm("Include www subdomain?", default=True)
 
     db_services: list[str] = []
     if server_config.mysql_installed:
@@ -166,7 +189,7 @@ def create() -> None:
             db_password = secrets.token_urlsafe(16)
             typer.echo(f"DB owner password: {db_password}")
 
-    site_root = paths.WWW_ROOT / domain
+    site_root = paths.WWW_ROOT / site_name
     _ensure_site_user(site_name)
     site_app_root, site_www_root, site_landing_root = _ensure_site_layout(site_root, site_name)
     _ensure_landing_page(site_landing_root, site_name)
@@ -190,7 +213,7 @@ def create() -> None:
         _create_mysql_db(db_name, db_owner_user, db_password)
 
     site_config = config.SiteConfig(
-        domain=domain,
+        site_name=site_name,
         site_user=site_name,
         site_root=str(site_root),
         site_app_root=str(site_app_root),
@@ -198,32 +221,20 @@ def create() -> None:
         site_landing_root=str(site_landing_root),
         repo_ssh=repo_ssh,
         branch=branch,
-        with_www=with_www,
         email=email,
         mode="landing",
-        tls_enabled=False,
-        ssl_certificate="",
-        ssl_certificate_key="",
+        domains=[],
         db_service=db_service,
         db_name=db_name,
         db_owner_user=db_owner_user,
     )
     config.write_site_config(site_config)
-
-    _render_nginx_config(
-        site_config,
-        server_config,
-        template_name="nginx_landing.conf",
-        root_path=site_config.site_landing_root,
-    )
-
-    if typer.confirm("Enable TLS now? (DNS must point to this server)", default=False):
-        tls_enable(domain)
+    typer.echo("Site created. Use `cherve domain add` to attach domains and configure nginx.")
 
 
-def deploy(domain: str | None = None, db_password: str | None = None) -> None:
+def deploy(site_name: str | None = None, db_password: str | None = None) -> None:
     system.require_root()
-    site_config = _select_site_config(domain)
+    site_config = _select_site_config(site_name)
     site_config = _migrate_v1_repo(site_config)
     site_root = Path(site_config.site_app_root)
     key_path = paths.HOME_ROOT / site_config.site_user / ".ssh" / "id_cherve_deploy"
@@ -260,12 +271,16 @@ def deploy(domain: str | None = None, db_password: str | None = None) -> None:
 
     if env_path.exists():
         env_values = envfile.parse_env(env_path)
-        scheme = "https" if site_config.tls_enabled else "http"
+        primary_domain = _primary_domain(site_config)
+        scheme = "https" if primary_domain and primary_domain.tls_enabled else "http"
         updates = {
             "APP_ENV": "production",
             "APP_DEBUG": "false",
-            "APP_URL": f"{scheme}://{site_config.domain}",
         }
+        if primary_domain:
+            updates["APP_URL"] = f"{scheme}://{primary_domain.name}"
+        else:
+            typer.echo("Warning: No domains configured; skipping APP_URL update.")
         if site_config.db_service:
             resolved_password = db_password or env_values.get("DB_PASSWORD", "")
             if not resolved_password:
@@ -317,47 +332,74 @@ def deploy(domain: str | None = None, db_password: str | None = None) -> None:
             )
 
 
-def activate(domain: str | None = None) -> None:
+def activate(site_name: str | None = None) -> None:
     system.require_root()
-    site_config = _select_site_config(domain)
+    site_config = _select_site_config(site_name)
     server_config = config.read_server_config()
     site_config = _migrate_v1_repo(site_config)
-    _render_nginx_config(
-        site_config,
-        server_config,
-        template_name="nginx_php_app.conf",
-        root_path=site_config.site_www_root,
-        client_max_body_size="20m",
-    )
+    for domain_config in site_config.domains:
+        _render_nginx_config(
+            site_config,
+            domain_config,
+            server_config,
+            template_name="nginx_php_app.conf",
+            root_path=site_config.site_www_root,
+            client_max_body_size="20m",
+        )
     updated = replace(site_config, mode="app")
     config.write_site_config(updated)
 
 
-def deactivate(domain: str | None = None) -> None:
+def deactivate(site_name: str | None = None) -> None:
     system.require_root()
-    site_config = _select_site_config(domain)
+    site_config = _select_site_config(site_name)
     server_config = config.read_server_config()
     site_config = _migrate_v1_repo(site_config)
-    _render_nginx_config(
-        site_config,
-        server_config,
-        template_name="nginx_landing.conf",
-        root_path=site_config.site_landing_root,
-    )
+    for domain_config in site_config.domains:
+        _render_nginx_config(
+            site_config,
+            domain_config,
+            server_config,
+            template_name="nginx_landing.conf",
+            root_path=site_config.site_landing_root,
+        )
     updated = replace(site_config, mode="landing")
     config.write_site_config(updated)
 
 
-def tls_enable(domain: str | None = None) -> None:
+def tls_enable(site_name: str | None = None, domain_name: str | None = None) -> None:
     system.require_root()
-    site_config = _select_site_config(domain)
+    site_config = _select_site_config(site_name)
+    domain_config, index = _select_domain(site_config, domain_name)
+    updated = _enable_domain_tls(site_config, domain_config, index)
+    config.write_site_config(updated)
+    _render_domain_for_site(updated, updated.domains[index])
+
+
+def _render_domain_for_site(site_config: config.SiteConfig, domain_config: config.DomainConfig) -> None:
+    server_config = config.read_server_config()
+    template_name = "nginx_php_app.conf" if site_config.mode == "app" else "nginx_landing.conf"
+    root_path = site_config.site_www_root if site_config.mode == "app" else site_config.site_landing_root
+    _render_nginx_config(
+        site_config,
+        domain_config,
+        server_config,
+        template_name=template_name,
+        root_path=root_path,
+        client_max_body_size="20m",
+    )
+
+
+def _enable_domain_tls(
+    site_config: config.SiteConfig, domain_config: config.DomainConfig, index: int
+) -> config.SiteConfig:
     if not typer.confirm("Confirm DNS is pointed at this server", default=False):
-        return
+        return site_config
     email = site_config.email or typer.prompt("Email for Let's Encrypt")
-    domains = _server_names(site_config)
+    domains = _server_names(domain_config)
     cert_paths = {
-        "ssl_certificate": f"/etc/letsencrypt/live/{site_config.domain}/fullchain.pem",
-        "ssl_certificate_key": f"/etc/letsencrypt/live/{site_config.domain}/privkey.pem",
+        "ssl_certificate": f"/etc/letsencrypt/live/{domain_config.name}/fullchain.pem",
+        "ssl_certificate_key": f"/etc/letsencrypt/live/{domain_config.name}/privkey.pem",
     }
     system.run(
         [
@@ -371,38 +413,62 @@ def tls_enable(domain: str | None = None) -> None:
         ],
         check=False,
     )
-    updated = replace(
-        site_config,
-        email=email,
+    updated_domain = replace(
+        domain_config,
         tls_enabled=True,
         ssl_certificate=cert_paths["ssl_certificate"],
         ssl_certificate_key=cert_paths["ssl_certificate_key"],
     )
-    config.write_site_config(updated)
-    system.run(["nginx", "-t"], capture=True)
-    system.run(["systemctl", "reload", "nginx"], capture=True)
+    updated_domains = list(site_config.domains)
+    updated_domains[index] = updated_domain
+    return replace(site_config, email=email, domains=updated_domains)
+
+
+def domain_add(site_name: str | None = None, domain_name: str | None = None) -> None:
+    system.require_root()
+    site_config = _select_site_config(site_name)
+    domain = domain_name or typer.prompt("Domain")
+    if any(existing.name == domain for existing in site_config.domains):
+        raise RuntimeError(f"Domain {domain} already exists for site {site_config.site_name}.")
+    with_www = typer.confirm("Include www subdomain?", default=True)
+    new_domain = config.DomainConfig(
+        name=domain,
+        with_www=with_www,
+        tls_enabled=False,
+        ssl_certificate="",
+        ssl_certificate_key="",
+    )
+    updated_domains = list(site_config.domains) + [new_domain]
+    updated_config = replace(site_config, domains=updated_domains)
+    config.write_site_config(updated_config)
+    _render_domain_for_site(updated_config, new_domain)
+    if typer.confirm("Enable TLS now? (DNS must point to this server)", default=False):
+        updated_config = _enable_domain_tls(updated_config, new_domain, len(updated_domains) - 1)
+        config.write_site_config(updated_config)
+        _render_domain_for_site(updated_config, updated_config.domains[-1])
 
 
 def _render_nginx_config(
     site_config: config.SiteConfig,
+    domain_config: config.DomainConfig,
     server_config: config.ServerConfig,
     template_name: str,
     root_path: str,
     client_max_body_size: str = "20m",
 ) -> None:
     template = resources.files("cherve.templates").joinpath(template_name)
-    server_names = " ".join(_server_names(site_config))
+    server_names = " ".join(_server_names(domain_config))
     https_redirect = ""
-    if site_config.tls_enabled:
+    if domain_config.tls_enabled:
         https_redirect = 'if ($scheme != "https") { return 301 https://$host$request_uri; }'
     ssl_block = ""
-    if site_config.tls_enabled and site_config.ssl_certificate and site_config.ssl_certificate_key:
+    if domain_config.tls_enabled and domain_config.ssl_certificate and domain_config.ssl_certificate_key:
         ssl_block = (
             "server {{\n"
             "    listen 443 ssl http2;\n"
             f"    server_name {server_names};\n"
-            f"    ssl_certificate {site_config.ssl_certificate};\n"
-            f"    ssl_certificate_key {site_config.ssl_certificate_key};\n"
+            f"    ssl_certificate {domain_config.ssl_certificate};\n"
+            f"    ssl_certificate_key {domain_config.ssl_certificate_key};\n"
             f"    root {root_path};\n"
             "    index index.php index.html index.htm;\n"
             "    client_max_body_size {client_max_body_size};\n"
@@ -442,13 +508,13 @@ def _render_nginx_config(
     sites_available.mkdir(parents=True, exist_ok=True)
     sites_enabled.mkdir(parents=True, exist_ok=True)
 
-    config_path = sites_available / f"{site_config.domain}.conf"
+    config_path = sites_available / f"{domain_config.name}.conf"
     if config_path.exists():
         backup = config_path.with_suffix(".conf.bak")
         config_path.replace(backup)
     config_path.write_text(rendered, encoding="utf-8")
 
-    enabled_path = sites_enabled / f"{site_config.domain}.conf"
+    enabled_path = sites_enabled / f"{domain_config.name}.conf"
     if not enabled_path.exists():
         enabled_path.symlink_to(config_path)
 

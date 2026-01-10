@@ -26,8 +26,17 @@ class ServerConfig:
 
 
 @dataclass(frozen=True)
+class DomainConfig:
+    name: str
+    with_www: bool
+    tls_enabled: bool
+    ssl_certificate: str
+    ssl_certificate_key: str
+
+
+@dataclass(frozen=True)
 class SiteConfig:
-    domain: str
+    site_name: str
     site_user: str
     site_root: str
     site_app_root: str
@@ -35,12 +44,9 @@ class SiteConfig:
     site_landing_root: str
     repo_ssh: str
     branch: str
-    with_www: bool
     email: str
     mode: str
-    tls_enabled: bool
-    ssl_certificate: str
-    ssl_certificate_key: str
+    domains: list[DomainConfig]
     db_service: str | None
     db_name: str | None
     db_owner_user: str | None
@@ -51,6 +57,8 @@ def _serialize_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return str(value)
+    if isinstance(value, list):
+        return f"[{', '.join(_serialize_value(item) for item in value)}]"
     if value is None:
         return '""'
     return f'"{value}"'
@@ -59,6 +67,13 @@ def _serialize_value(value: Any) -> str:
 def _toml_dumps(data: dict[str, Any]) -> str:
     lines: list[str] = []
     for key, value in data.items():
+        if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+            for entry in value:
+                lines.append(f"[[{key}]]")
+                for nested_key, nested_value in entry.items():
+                    lines.append(f"{nested_key} = {_serialize_value(nested_value)}")
+                lines.append("")
+            continue
         if isinstance(value, dict):
             lines.append(f"[{key}]")
             for nested_key, nested_value in value.items():
@@ -118,27 +133,66 @@ def read_server_config(path: Path | None = None) -> ServerConfig:
 
 def write_site_config(config: SiteConfig, path: Path | None = None) -> None:
     if path is None:
-        path = paths.SITES_DIR / f"{config.domain}.toml"
+        path = paths.SITES_DIR / f"{config.site_name}.toml"
     data = asdict(config)
-    data["tls"] = {
-        "enabled": data.pop("tls_enabled"),
-        "ssl_certificate": data.pop("ssl_certificate"),
-        "ssl_certificate_key": data.pop("ssl_certificate_key"),
-    }
-    _atomic_write(path, _toml_dumps(data))
+    domains = data.pop("domains")
+    ordered = {**data, "domains": domains}
+    _atomic_write(path, _toml_dumps(ordered))
 
 
-def read_site_config(domain: str, path: Path | None = None) -> SiteConfig:
+def _domain_from_legacy(raw: dict[str, Any]) -> list[DomainConfig]:
+    if "domains" in raw:
+        domains_raw = raw["domains"]
+        if isinstance(domains_raw, list):
+            domains: list[DomainConfig] = []
+            for entry in domains_raw:
+                if isinstance(entry, str):
+                    domains.append(
+                        DomainConfig(
+                            name=entry,
+                            with_www=False,
+                            tls_enabled=False,
+                            ssl_certificate="",
+                            ssl_certificate_key="",
+                        )
+                    )
+                elif isinstance(entry, dict):
+                    domains.append(
+                        DomainConfig(
+                            name=entry.get("name", entry.get("domain", "")),
+                            with_www=entry.get("with_www", False),
+                            tls_enabled=entry.get("tls_enabled", False),
+                            ssl_certificate=entry.get("ssl_certificate", ""),
+                            ssl_certificate_key=entry.get("ssl_certificate_key", ""),
+                        )
+                    )
+            return [domain for domain in domains if domain.name]
+    if "domain" in raw:
+        tls_raw = raw.get("tls", {})
+        return [
+            DomainConfig(
+                name=raw["domain"],
+                with_www=raw.get("with_www", False),
+                tls_enabled=tls_raw.get("enabled", False),
+                ssl_certificate=tls_raw.get("ssl_certificate", ""),
+                ssl_certificate_key=tls_raw.get("ssl_certificate_key", ""),
+            )
+        ]
+    return []
+
+
+def read_site_config(site_name: str, path: Path | None = None) -> SiteConfig:
     if path is None:
-        path = paths.SITES_DIR / f"{domain}.toml"
+        path = paths.SITES_DIR / f"{site_name}.toml"
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    site_root = raw["site_root"]
+    resolved_site_name = raw.get("site_name") or raw.get("site_user") or raw.get("domain") or site_name
+    site_root = raw.get("site_root") or str(paths.WWW_ROOT / resolved_site_name)
     app_root = raw.get("site_app_root") or str(Path(site_root) / "_cherve" / "app")
     landing_root = raw.get("site_landing_root") or str(Path(site_root) / "_cherve" / "landing")
     www_root = raw.get("site_www_root") or str(Path(app_root) / "public")
-    tls_raw = raw.get("tls", {})
+    domains = _domain_from_legacy(raw)
     return SiteConfig(
-        domain=raw["domain"],
+        site_name=resolved_site_name,
         site_user=raw["site_user"],
         site_root=site_root,
         site_app_root=app_root,
@@ -146,12 +200,9 @@ def read_site_config(domain: str, path: Path | None = None) -> SiteConfig:
         site_landing_root=landing_root,
         repo_ssh=raw.get("repo_ssh", ""),
         branch=raw.get("branch", "main"),
-        with_www=raw.get("with_www", False),
         email=raw.get("email", ""),
         mode=raw.get("mode", "landing"),
-        tls_enabled=tls_raw.get("enabled", False),
-        ssl_certificate=tls_raw.get("ssl_certificate", ""),
-        ssl_certificate_key=tls_raw.get("ssl_certificate_key", ""),
+        domains=domains,
         db_service=raw.get("db_service"),
         db_name=raw.get("db_name"),
         db_owner_user=raw.get("db_owner_user"),

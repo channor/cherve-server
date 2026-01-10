@@ -17,12 +17,16 @@ Installs common server requirements for hosting PHP/Laravel apps and writes a se
 Creates a single isolated “site” on the server:
 
 - One dedicated Linux user per site (for isolation and separation of concern)
-- One site container root under `/var/www/<domain>`
+- One site container root under `/var/www/<site_name>`
 - A GitHub deploy SSH key owned by the site user
 - Optional database + DB owner user
-- A default nginx site config for the domain that serves a simple “under construction” landing page
+- No nginx config is created until you attach domains via `cherve domain add`
 
-Writes a per-site config file under `/etc/cherve/sites.d/<domain>.toml`.
+Writes a per-site config file under `/etc/cherve/sites.d/<site_name>.toml`.
+
+### `cherve domain add`
+Attaches a domain to an existing site, writes its nginx config, and optionally enables TLS for
+that domain. Each domain gets its own nginx config file to allow separate TLS certificates.
 
 ### `cherve site deploy`
 Deploys or updates the app code into the site’s repo directory:
@@ -36,13 +40,16 @@ Deploys or updates the app code into the site’s repo directory:
 - Runs composer and Laravel tasks
 
 ### `cherve site activate`
-Switches the domain from the default landing page to the deployed app by rewriting the nginx site config to point at the app (and reloading nginx).
+Switches all domains for a site from the default landing page to the deployed app by rewriting
+each nginx site config to point at the app (and reloading nginx).
 
 ### `cherve site deactivate`
-Switches the domain back to the default landing page by rewriting the nginx site config to point at the landing root (and reloading nginx).
+Switches all domains for a site back to the default landing page by rewriting each nginx site
+config to point at the landing root (and reloading nginx).
 
 ### `cherve site tls`
-Obtains (or renews) a TLS certificate for the site using certbot and configures nginx to serve HTTPS (and redirect HTTP → HTTPS).
+Enables TLS for a specific domain belonging to a site using certbot and configures nginx to serve
+HTTPS (and redirect HTTP → HTTPS).
 
 All `cherve` actions require **sudo**.
 
@@ -96,9 +103,15 @@ sudo cherve server install
 sudo cherve site create
 ```
 
-This will create the site user + directories, and immediately configure nginx to serve a simple landing page for the domain.
+This will create the site user + directories. Domains and nginx configuration come next.
 
-### 3. Deploy the app code
+### 3. Attach a domain
+
+```bash
+sudo cherve domain add
+```
+
+### 4. Deploy the app code
 
 ```bash
 sudo cherve site deploy
@@ -107,25 +120,25 @@ sudo cherve site deploy
 If you have multiple sites, you can deploy a specific one:
 
 ```bash
-sudo cherve site deploy microsoft.com
+sudo cherve site deploy microsoft
 ```
 
-### 4. Activate the app (switch nginx to the app)
+### 5. Activate the app (switch nginx to the app)
 
 ```bash
 sudo cherve site activate
 ```
 
-Or specify a domain:
+Or specify a site:
 
 ```bash
-sudo cherve site activate microsoft.com
+sudo cherve site activate microsoft
 ```
 
-### 5. Enable TLS (when DNS points to the server)
+### 6. Enable TLS (when DNS points to the server)
 
 ```bash
-sudo cherve site tls
+sudo cherve site tls enable microsoft microsoft.com
 ```
 
 ---
@@ -159,28 +172,35 @@ certbot_installed = true
 
 ### Per-site config
 
-- `/etc/cherve/sites.d/<domain>.toml` (root-owned)
+- `/etc/cherve/sites.d/<site_name>.toml` (root-owned)
 - Written by: `cherve site create`
 
 Example:
 
 ```toml
-domain = "microsoft.com"
+site_name = "microsoft"
 site_user = "microsoft"
 
 # Site container root
-site_root = "/var/www/microsoft.com"
+site_root = "/var/www/microsoft"
 
 # Repo working tree (what `cherve site deploy` targets)
-repo_root = "/var/www/microsoft.com/app"
+site_app_root = "/var/www/microsoft/_cherve/app"
+site_www_root = "/var/www/microsoft/_cherve/app/public"
 
-# Landing root used by the default nginx config (what `cherve site deactivate` targets)
-landing_root = "/var/www/microsoft.com/_cherve/landing"
+# Landing root used by the nginx landing config (what `cherve site deactivate` targets)
+site_landing_root = "/var/www/microsoft/_cherve/landing"
 
 repo_ssh = "git@github.com:ORG/REPO.git"
 branch = "main"
-with_www = true
 email = ""
+
+[[domains]]
+name = "microsoft.com"
+with_www = true
+tls_enabled = true
+ssl_certificate = "/etc/letsencrypt/live/microsoft.com/fullchain.pem"
+ssl_certificate_key = "/etc/letsencrypt/live/microsoft.com/privkey.pem"
 
 db_service = "mysql"
 db_name = "microsoft_sd73io"
@@ -190,7 +210,7 @@ db_owner_user = "microsoft_db_owner"
 
 ### App env file (secrets)
 
-- `<repo_root>/.env`
+- `<site_app_root>/.env`
 - Created on first deploy by copying `.env.prod`, `.env.production`, or `.env.example`
 - Updated to production-ready values during deploy
 
@@ -213,55 +233,59 @@ Default install choices:
 ### `cherve site create`
 
 - Prompts for:
-  - username, domain, email (optional)
-  - repo SSH URL, branch, include www
+  - site name, email (optional)
+  - repo SSH URL, branch
   - DB options (db service (choices if multiple available), db name + owner user + password generation)
-  - enable TLS now (DNS must already point to this server) (optional)
 - Creates site Linux user with disabled password
-- Creates site container root `/var/www/<domain>` and permissions
+- Creates site container root `/var/www/<site_name>` and permissions
 - Creates a landing directory at `<site_root>/_cherve/landing` with a simple under-construction page
 - Generates deploy key under `/home/<site_user>/.ssh/` and prints the public key for GitHub Deploy Keys
-- Writes `/etc/cherve/sites.d/<domain>.toml`
-- Creates nginx site config for the domain pointing to the landing root and enables it (`nginx -t` + reload)
-- If TLS was enabled during create, runs `cherve site tls` flow for this domain
+- Writes `/etc/cherve/sites.d/<site_name>.toml`
+- Domains and nginx configuration are handled via `cherve domain add`
 
-### `cherve site deploy [domain]`
+### `cherve site deploy [site_name]`
 
-- Selects site (by domain argument or interactive list)
+- Selects site (by site name argument or interactive list)
 - Ensures repo present in `<repo_root>`:
   - clone or pull as the site user using the deploy key
 - Creates `.env` if missing by copying the best available template from `<repo_root>`
 - Makes `.env` production-ready:
   - `APP_ENV=production`
   - `APP_DEBUG=false`
-  - `APP_URL` based on domain (https when TLS is enabled)
+  - `APP_URL` based on the primary domain (https when TLS is enabled)
   - `DB_*` using the site DB config (prompt for DB password if not available in current session)
 - Runs (as site user):
   - `composer install --no-dev --optimize-autoloader`
   - Laravel tasks when `artisan` exists (key generate, migrate, cache)
 
-### `cherve site activate [domain]`
+### `cherve site activate [site_name]`
 
-- Selects site (by domain argument or interactive list)
-- Rewrites the nginx config for the domain to point to the app root:
+- Selects site (by site name argument or interactive list)
+- Rewrites the nginx config for each domain to point to the app root:
   - Laravel default: `<repo_root>/public`
   - Uses PHP-FPM socket from server config
 - Validates (`nginx -t`) and reloads nginx
-- If TLS is enabled for the site, forces HTTPS redirect
+- If TLS is enabled for a domain, forces HTTPS redirect for that domain
 
-### `cherve site deactivate [domain]`
+### `cherve site deactivate [site_name]`
 
-- Selects site (by domain argument or interactive list)
-- Rewrites the nginx config for the domain to point back to the landing root:
+- Selects site (by site name argument or interactive list)
+- Rewrites the nginx config for each domain to point back to the landing root:
   - `<landing_root>`
 - Validates (`nginx -t`) and reloads nginx
 
-### `cherve site tls [domain]`
+### `cherve site tls enable [site_name] [domain]`
 
-- Selects site (by domain argument or interactive list)
+- Selects site and domain (by argument or interactive list)
 - Runs certbot for the domain (and optional www)
 - Updates nginx config to serve HTTPS and redirect HTTP → HTTPS
 - Reloads nginx
+
+### `cherve domain add [site_name] [domain]`
+
+- Selects site and attaches a new domain (prompting when arguments are omitted)
+- Writes nginx config for the domain using the site’s current mode (landing/app)
+- Optionally enables TLS for that domain
 
 ---
 

@@ -34,7 +34,7 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
     (site_root / "artisan").write_text("#!/usr/bin/env php\n", encoding="utf-8")
 
     site_config = config.SiteConfig(
-        domain="example.com",
+        site_name="example",
         site_user="example",
         site_root=str(tmp_path / "site"),
         site_app_root=str(site_root),
@@ -42,20 +42,25 @@ def test_site_deploy_creates_env_and_runs_commands(tmp_path: Path, monkeypatch) 
         site_landing_root=str(tmp_path / "site" / "_cherve" / "landing"),
         repo_ssh="git@github.com:ORG/REPO.git",
         branch="main",
-        with_www=False,
         email="",
         mode="landing",
-        tls_enabled=False,
-        ssl_certificate="",
-        ssl_certificate_key="",
+        domains=[
+            config.DomainConfig(
+                name="example.com",
+                with_www=False,
+                tls_enabled=False,
+                ssl_certificate="",
+                ssl_certificate_key="",
+            )
+        ],
         db_service="mysql",
         db_name="example_db",
         db_owner_user="example_user",
     )
     paths.SITES_DIR.mkdir(parents=True, exist_ok=True)
-    config.write_site_config(site_config, path=paths.SITES_DIR / "example.com.toml")
+    config.write_site_config(site_config, path=paths.SITES_DIR / "example.toml")
 
-    result = CliRunner().invoke(app, ["site", "deploy", "example.com"], input="secret-password\n")
+    result = CliRunner().invoke(app, ["site", "deploy", "example"], input="secret-password\n")
     assert result.exit_code == 0
 
     env_path = site_root / ".env"

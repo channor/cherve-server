@@ -26,24 +26,29 @@ def test_server_config_round_trip(tmp_path: Path) -> None:
 def test_site_config_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "site.toml"
     original = config.SiteConfig(
-        domain="example.com",
+        site_name="example",
         site_user="example",
-        site_root="/var/www/example.com",
-        site_app_root="/var/www/example.com/_cherve/app",
-        site_www_root="/var/www/example.com/public",
-        site_landing_root="/var/www/example.com/_cherve/landing",
+        site_root="/var/www/example",
+        site_app_root="/var/www/example/_cherve/app",
+        site_www_root="/var/www/example/public",
+        site_landing_root="/var/www/example/_cherve/landing",
         repo_ssh="git@github.com:ORG/REPO.git",
         branch="main",
-        with_www=True,
         email="admin@example.com",
         mode="landing",
-        tls_enabled=True,
-        ssl_certificate="/etc/letsencrypt/live/example.com/fullchain.pem",
-        ssl_certificate_key="/etc/letsencrypt/live/example.com/privkey.pem",
+        domains=[
+            config.DomainConfig(
+                name="example.com",
+                with_www=True,
+                tls_enabled=True,
+                ssl_certificate="/etc/letsencrypt/live/example.com/fullchain.pem",
+                ssl_certificate_key="/etc/letsencrypt/live/example.com/privkey.pem",
+            )
+        ],
         db_service="mysql",
         db_name="example_db",
         db_owner_user="example_db_owner",
     )
     config.write_site_config(original, path=path)
-    loaded = config.read_site_config("example.com", path=path)
+    loaded = config.read_site_config("example", path=path)
     assert loaded == original
